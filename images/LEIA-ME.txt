@@ -1,0 +1,8 @@
+Pasta de imagens do Vivassol Gerencial V2.
+
+- icone.svg = ícone provisório do aplicativo (aparece na aba do navegador,
+  no manifest e na tela de login).
+
+Quando tiver a logo oficial da Vivassol:
+1. Salve aqui como "icone.svg" (ou .png) substituindo o provisório.
+2. Se usar .png, atualize as referências em index.html e manifest.json.

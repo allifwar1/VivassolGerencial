@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2E7D32">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Vivassol Gerencial</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="images/icone.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="images/icone.svg">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Tela de login -->
+  <div id="tela-login" class="oculto">
+    <form id="form-login" class="cartao-login" autocomplete="off">
+      <img src="images/icone.svg" alt="" class="logo-login">
+      <h1>Vivassol Gerencial</h1>
+      <p class="subtitulo">Entre para continuar</p>
+      <label class="rotulo">Usuário
+        <input id="login-usuario" class="campo" autocapitalize="none" autocomplete="username" required>
+      </label>
+      <label class="rotulo">Senha
+        <input id="login-senha" class="campo" type="password" autocomplete="current-password" required>
+      </label>
+      <p id="login-erro" class="erro oculto"></p>
+      <button type="submit" class="btn btn-primario btn-grande btn-cheio">Entrar</button>
+    </form>
+  </div>
+
+  <!-- Aplicativo -->
+  <div id="app" class="oculto">
+    <aside id="nav-lateral"></aside>
+    <div id="area-principal">
+      <header id="topo">
+        <div class="topo-marca"><img src="images/icone.svg" alt=""></div>
+        <h2 id="topo-titulo"></h2>
+        <button id="botao-status" class="status" type="button" title="Estado da sincronização">
+          <span class="ponto"></span><span id="status-texto">—</span>
+        </button>
+      </header>
+      <main id="conteudo"></main>
+      <nav id="nav-inferior"></nav>
+    </div>
+  </div>
+
+  <div id="area-toasts"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/inicio.js"></script>
+  <script src="js/vendas.js"></script>
+  <script src="js/estoque.js"></script>
+  <script src="js/clientes.js"></script>
+  <script src="js/produtos.js"></script>
+  <script src="js/configuracoes.js"></script>
+</body>
+</html>

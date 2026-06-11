@@ -1,0 +1,11 @@
+{
+  "name": "Vivassol Gerencial",
+  "short_name": "Vivassol",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#F4F5F0",
+  "theme_color": "#2E7D32",
+  "icons": [
+    { "src": "images/icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
