@@ -200,6 +200,8 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 
 .btn-primario { background: var(--verde); color: #fff; }
 .btn-primario:hover { filter: brightness(1.07); }
+#inicio-nova-venda { background: var(--vermelho); }
+#inicio-nova-venda:hover { filter: brightness(1.07); }
 .btn-secundario { background: var(--cartao); color: var(--texto); border: 1px solid var(--borda); }
 .btn-perigo { background: var(--vermelho); color: #fff; }
 .btn-grande { padding: 15px 20px; font-size: 17px; border-radius: var(--raio); }
