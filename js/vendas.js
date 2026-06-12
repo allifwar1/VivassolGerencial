@@ -444,7 +444,7 @@ function renderPdv(el) {
     sugestoes = produtosAtivos().filter((p) => contemTexto(p.nome, texto)).slice(0, 8);
     selecionada = 0;
     if (!sugestoes.length) {
-      sugestoesEl.innerHTML = `<div class="sugestao"><small>Nenhum produto encontrado. Cadastre em “Produtos”.</small></div>`;
+      sugestoesEl.innerHTML = `<div class="sugestao"><small>Nenhum produto encontrado. Cadastre em "Produtos".</small></div>`;
       sugestoesEl.classList.remove("oculto");
       return;
     }
