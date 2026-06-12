@@ -501,6 +501,25 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 
 .com-barra-fixa { padding-bottom: 80px; }
 
+/* ---------------- composição de produto ---------------- */
+
+.composicao-lista { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+
+.composicao-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.composicao-nome { flex: 1; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composicao-qtd { width: 64px; border: 1px solid var(--borda); border-radius: 8px; padding: 6px; font-size: 14px; text-align: center; background: var(--cartao); color: var(--texto); }
+.composicao-unidade { font-size: 12px; color: var(--texto-suave); min-width: 20px; }
+.composicao-vazio { font-size: 13px; color: var(--texto-suave); padding: 4px 0; }
+
 /* ---------------- modais ---------------- */
 
 .modal-fundo {

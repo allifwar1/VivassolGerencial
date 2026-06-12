@@ -423,6 +423,19 @@ function renderPdv(el) {
           });
         });
         salvarTabela("vendas");
+        let insumosMudaram = false;
+        pdvItens.forEach((item) => {
+          const produto = App.db.produtos.find((p) => p.id === item.produto_id);
+          (produto?.composicao || []).forEach((comp) => {
+            const insumo = App.db.insumos.find((i) => i.id === comp.id_insumo);
+            if (insumo) {
+              insumo.quantidade = numero(insumo.quantidade) - numero(comp.quantidade) * numero(item.quantidade);
+              insumo.atualizado_em = new Date().toISOString();
+              insumosMudaram = true;
+            }
+          });
+        });
+        if (insumosMudaram) salvarTabela("insumos");
         pdvItens = [];
         modal.fechar();
         toast("Venda registrada!");
