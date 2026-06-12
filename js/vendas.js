@@ -247,12 +247,32 @@ function abrirEditarVenda(idVenda, aoMudar) {
       </div>
       <div id="edit-pdv-itens" class="pdv-itens" style="margin-bottom:10px"></div>
       <div class="pdv-total"><span>Total</span><strong id="edit-pdv-total">${dinheiro(vendaAgrupada.total)}</strong></div>
+      <div class="venda-stats" id="edit-financeiro">
+        <div class="venda-stat-linha"><span>Custo dos insumos</span><span id="edit-custo">—</span></div>
+        <div class="venda-stat-linha lucro"><span>Lucro</span><span id="edit-lucro">—</span></div>
+      </div>
       <div class="linha-botoes" style="margin-top:14px">
         <button type="submit" class="btn btn-primario">Salvar alterações</button>
       </div>
     </form>`;
 
   const modal = abrirModal(`Editar venda #${esc(idVenda)}`, corpo);
+
+  function atualizarFinanceiro() {
+    const total = editItens.reduce((s, i) => s + i.subtotal, 0);
+    $("#edit-pdv-total", corpo).textContent = dinheiro(total);
+    const custo = editItens.reduce((c, item) => {
+      const produto = App.db.produtos.find(p => p.id === item.produto_id);
+      return c + (produto?.composicao || []).reduce((cc, comp) => {
+        const insumo = App.db.insumos.find(i => i.id === comp.id_insumo);
+        return cc + (insumo ? numero(insumo.custo) * numero(comp.quantidade) * numero(item.quantidade) : 0);
+      }, 0);
+    }, 0);
+    const lucro = total - custo;
+    const margem = total > 0 ? Math.round((lucro / total) * 100) : 0;
+    $("#edit-custo", corpo).textContent = dinheiro(custo);
+    $("#edit-lucro", corpo).textContent = `${dinheiro(lucro)} (${margem}%)`;
+  }
 
   function renderEditItens() {
     const area = $("#edit-pdv-itens", corpo);
@@ -266,7 +286,7 @@ function abrirEditarVenda(idVenda, aoMudar) {
             <button type="button" class="pdv-remover" aria-label="Remover">&times;</button>
           </div>`).join("")
       : `<p class="vazio">Nenhum item.</p>`;
-    $("#edit-pdv-total", corpo).textContent = dinheiro(editItens.reduce((s, i) => s + i.subtotal, 0));
+    atualizarFinanceiro();
   }
   renderEditItens();
 
@@ -304,7 +324,7 @@ function abrirEditarVenda(idVenda, aoMudar) {
     item[campo] = numero(e.target.value);
     item.subtotal = numero(item.quantidade) * numero(item.preco_unit);
     $(".pdv-item-sub", linha).textContent = dinheiro(item.subtotal);
-    $("#edit-pdv-total", corpo).textContent = dinheiro(editItens.reduce((s, i) => s + i.subtotal, 0));
+    atualizarFinanceiro();
   });
 
   $("#edit-pdv-itens", corpo).addEventListener("click", e => {

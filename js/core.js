@@ -50,8 +50,11 @@ function gerarId(prefixo, tabela) {
 }
 
 function gerarIdVenda() {
-  const max = App.db.vendas.reduce((m, v) => Math.max(m, parseInt(v.id_venda) || 0), 0);
-  return String(max + 1);
+  const max = App.db.vendas.reduce((m, v) => {
+    const n = parseInt(String(v.id_venda).replace("VDA", "")) || 0;
+    return Math.max(m, n);
+  }, 0);
+  return `VDA${max + 1}`;
 }
 
 function esc(valor) {
@@ -92,10 +95,14 @@ function contemTexto(texto, busca) {
 function parseComposicao(str, insumos) {
   if (!str) return [];
   return String(str).split(",").map(s => s.trim()).filter(Boolean).flatMap(parte => {
-    const m = parte.match(/^(\w+)\(([^)]+)\)$/);
+    // Formato atual: INS1[Farinha](200) — aceita também formato legado INS1(200)
+    const m = parte.match(/^(\w+)(?:\[([^\]]*)\])?\(([^)]+)\)$/);
     if (!m) return [];
-    const insumo = (insumos || []).find(i => i.id === m[1]);
-    return insumo ? [{ id_insumo: insumo.id, nome_insumo: insumo.nome, quantidade: numero(m[2]), unidade: insumo.unidade || "" }] : [];
+    const [, idInsumo, nomeCache, qtdStr] = m;
+    const insumo = (insumos || []).find(i => i.id === idInsumo);
+    const nome = insumo?.nome || nomeCache || idInsumo;
+    const unidade = insumo?.unidade || "";
+    return [{ id_insumo: idInsumo, nome_insumo: nome, quantidade: numero(qtdStr), unidade }];
   });
 }
 
@@ -213,7 +220,7 @@ async function enviarPendentes() {
       const linhasParaEnvio = tabela === "produtos"
         ? App.db.produtos.map(p => ({
             ...p,
-            composicao: (p.composicao || []).map(c => `${c.id_insumo}(${c.quantidade})`).join(", ")
+            composicao: (p.composicao || []).map(c => `${c.id_insumo}[${c.nome_insumo}](${c.quantidade})`).join(", ")
           }))
         : App.db[tabela];
       await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvio });
@@ -230,7 +237,7 @@ async function enviarPendentes() {
 }
 
 function migrarIds() {
-  if (App.db.configuracoes.find(c => c.chave === "ids_migrados_v2")?.valor === "sim") return;
+  if (App.db.configuracoes.find(c => c.chave === "ids_migrados_v3")?.valor === "sim") return;
 
   const mapeamentos = {};
 
@@ -248,7 +255,7 @@ function migrarIds() {
     });
   });
 
-  // Vendas: id_venda → número sequencial, id de item → "N-k"
+  // Vendas: id_venda → VDA1, VDA2... / id de item → "VDA1-1", "VDA1-2"...
   const grupos = {};
   App.db.vendas.forEach(v => {
     const chave = v.id_venda || v.id;
@@ -259,7 +266,7 @@ function migrarIds() {
   let numVenda = 0;
   Object.keys(grupos).forEach(oldId => {
     numVenda++;
-    const novoGrupoId = String(numVenda);
+    const novoGrupoId = `VDA${numVenda}`;
     mapeamentos.vendas_grupo[oldId] = novoGrupoId;
     grupos[oldId].forEach((item, j) => {
       item.id_venda = novoGrupoId;
@@ -279,9 +286,11 @@ function migrarIds() {
   });
 
   // Marcar migração concluída
-  const idx = App.db.configuracoes.findIndex(c => c.chave === "ids_migrados_v2");
-  if (idx >= 0) App.db.configuracoes[idx].valor = "sim";
-  else App.db.configuracoes.push({ chave: "ids_migrados_v2", valor: "sim" });
+  ["ids_migrados_v2", "ids_migrados_v3"].forEach(chave => {
+    const idx = App.db.configuracoes.findIndex(c => c.chave === chave);
+    if (idx >= 0) App.db.configuracoes[idx].valor = "sim";
+    else App.db.configuracoes.push({ chave, valor: "sim" });
+  });
 
   TABELAS.forEach(t => salvarTabela(t));
 }
@@ -298,7 +307,7 @@ async function sincronizar(opcoes = {}) {
       const linhasParaEnvio = tabela === "produtos"
         ? App.db.produtos.map(p => ({
             ...p,
-            composicao: (p.composicao || []).map(c => `${c.id_insumo}(${c.quantidade})`).join(", ")
+            composicao: (p.composicao || []).map(c => `${c.id_insumo}[${c.nome_insumo}](${c.quantidade})`).join(", ")
           }))
         : App.db[tabela];
       await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvio });
