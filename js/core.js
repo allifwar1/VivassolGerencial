@@ -292,7 +292,10 @@ function migrarIds() {
     else App.db.configuracoes.push({ chave, valor: "sim" });
   });
 
-  TABELAS.forEach(t => salvarTabela(t));
+  // Apenas marca todas as tabelas como pendentes de envio ao servidor
+  // (não chama salvarTabela() para evitar sobrescrever localStorage com dados incompletos)
+  TABELAS.forEach(t => App.tabelasPendentes.add(t));
+  salvarPendentesLocal();
 }
 
 async function sincronizar(opcoes = {}) {
@@ -317,18 +320,28 @@ async function sincronizar(opcoes = {}) {
     // 2) Baixa tudo da planilha.
     const dados = await chamarApi("obterTudo");
     const antes = JSON.stringify(App.db);
+
+    // Preservar composicao local antes de qualquer overwrite pela planilha
+    const composicaoLocal = new Map(
+      (App.db.produtos || [])
+        .filter(p => Array.isArray(p.composicao) && p.composicao.length > 0)
+        .map(p => [p.id, p.composicao])
+    );
+
     TABELAS.forEach((t) => {
       // Tabela com alteração local pendente nunca é sobrescrita.
       if (Array.isArray(dados[t]) && !App.tabelasPendentes.has(t)) App.db[t] = dados[t];
     });
     // Desserializar composição dos produtos (string da planilha → array)
+    // Se a planilha tiver composição usa ela; senão, preserva a versão local
     if (Array.isArray(App.db.produtos)) {
-      App.db.produtos = App.db.produtos.map(p => ({
-        ...p,
-        composicao: typeof p.composicao === "string"
+      App.db.produtos = App.db.produtos.map(p => {
+        const daPlanilha = typeof p.composicao === "string" && p.composicao
           ? parseComposicao(p.composicao, App.db.insumos)
-          : (p.composicao || [])
-      }));
+          : null;
+        const comp = (daPlanilha && daPlanilha.length > 0) ? daPlanilha : (composicaoLocal.get(p.id) || []);
+        return { ...p, composicao: comp };
+      });
     }
     migrarIds();
     if (JSON.stringify(App.db) !== antes) {
