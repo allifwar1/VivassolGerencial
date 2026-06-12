@@ -25,7 +25,7 @@ const ABAS = {
   configuracoes: ["chave", "valor"],
   usuarios: ["id", "usuario", "nome", "perfil", "status"],
   clientes: ["id", "nome", "telefone", "endereco", "observacoes", "criado_em"],
-  produtos: ["id", "nome", "categoria", "preco", "unidade", "ativo", "criado_em"],
+  produtos: ["id", "nome", "categoria", "preco", "unidade", "ativo", "criado_em", "composicao"],
   insumos: ["id", "nome", "categoria", "unidade", "quantidade", "estoque_minimo", "custo", "atualizado_em"],
   vendas: ["id", "id_venda", "data", "cliente_id", "cliente_nome", "produto_id", "produto_nome",
            "quantidade", "preco_unit", "subtotal", "pagamento", "status", "entrega",

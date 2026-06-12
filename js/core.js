@@ -41,6 +41,19 @@ function uid(prefixo) {
   return `${prefixo || "id"}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function gerarId(prefixo, tabela) {
+  const max = App.db[tabela].reduce((m, r) => {
+    const n = parseInt(String(r.id).replace(prefixo, "")) || 0;
+    return Math.max(m, n);
+  }, 0);
+  return `${prefixo}${max + 1}`;
+}
+
+function gerarIdVenda() {
+  const max = App.db.vendas.reduce((m, v) => Math.max(m, parseInt(v.id_venda) || 0), 0);
+  return String(max + 1);
+}
+
 function esc(valor) {
   return String(valor ?? "").replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
@@ -70,7 +83,20 @@ function semAcentos(texto) {
 }
 
 function contemTexto(texto, busca) {
-  return semAcentos(texto).includes(semAcentos(busca));
+  if (!busca) return true;
+  const haystack = semAcentos(String(texto || "")).toLowerCase();
+  const fragmentos = semAcentos(String(busca)).toLowerCase().trim().split(/\s+/).filter(Boolean);
+  return fragmentos.every(f => haystack.includes(f));
+}
+
+function parseComposicao(str, insumos) {
+  if (!str) return [];
+  return String(str).split(",").map(s => s.trim()).filter(Boolean).flatMap(parte => {
+    const m = parte.match(/^(\w+)\(([^)]+)\)$/);
+    if (!m) return [];
+    const insumo = (insumos || []).find(i => i.id === m[1]);
+    return insumo ? [{ id_insumo: insumo.id, nome_insumo: insumo.nome, quantidade: numero(m[2]), unidade: insumo.unidade || "" }] : [];
+  });
 }
 
 function ehAtivo(registro) {
@@ -184,7 +210,13 @@ async function enviarPendentes() {
   atualizarStatus("sincronizando");
   try {
     for (const tabela of [...App.tabelasPendentes]) {
-      await chamarApi("salvarTabela", { tabela, linhas: App.db[tabela] });
+      const linhasParaEnvio = tabela === "produtos"
+        ? App.db.produtos.map(p => ({
+            ...p,
+            composicao: (p.composicao || []).map(c => `${c.id_insumo}(${c.quantidade})`).join(", ")
+          }))
+        : App.db[tabela];
+      await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvio });
       App.tabelasPendentes.delete(tabela);
       salvarPendentesLocal();
     }
@@ -197,6 +229,63 @@ async function enviarPendentes() {
   }
 }
 
+function migrarIds() {
+  if (App.db.configuracoes.find(c => c.chave === "ids_migrados_v2")?.valor === "sim") return;
+
+  const mapeamentos = {};
+
+  [
+    { nome: "insumos", prefixo: "INS" },
+    { nome: "produtos", prefixo: "PRO" },
+    { nome: "clientes", prefixo: "CLI" },
+    { nome: "usuarios", prefixo: "USR" },
+  ].forEach(({ nome, prefixo }) => {
+    mapeamentos[nome] = {};
+    App.db[nome].forEach((item, i) => {
+      const novoId = `${prefixo}${i + 1}`;
+      mapeamentos[nome][item.id] = novoId;
+      item.id = novoId;
+    });
+  });
+
+  // Vendas: id_venda → número sequencial, id de item → "N-k"
+  const grupos = {};
+  App.db.vendas.forEach(v => {
+    const chave = v.id_venda || v.id;
+    if (!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(v);
+  });
+  mapeamentos.vendas_grupo = {};
+  let numVenda = 0;
+  Object.keys(grupos).forEach(oldId => {
+    numVenda++;
+    const novoGrupoId = String(numVenda);
+    mapeamentos.vendas_grupo[oldId] = novoGrupoId;
+    grupos[oldId].forEach((item, j) => {
+      item.id_venda = novoGrupoId;
+      item.id = `${novoGrupoId}-${j + 1}`;
+    });
+  });
+
+  // Atualizar referências cruzadas
+  App.db.produtos.forEach(p => {
+    (p.composicao || []).forEach(c => {
+      if (mapeamentos.insumos?.[c.id_insumo]) c.id_insumo = mapeamentos.insumos[c.id_insumo];
+    });
+  });
+  App.db.vendas.forEach(v => {
+    if (mapeamentos.produtos?.[v.produto_id]) v.produto_id = mapeamentos.produtos[v.produto_id];
+    if (mapeamentos.clientes?.[v.cliente_id]) v.cliente_id = mapeamentos.clientes[v.cliente_id];
+  });
+
+  // Marcar migração concluída
+  const idx = App.db.configuracoes.findIndex(c => c.chave === "ids_migrados_v2");
+  if (idx >= 0) App.db.configuracoes[idx].valor = "sim";
+  else App.db.configuracoes.push({ chave: "ids_migrados_v2", valor: "sim" });
+
+  TABELAS.forEach(t => salvarTabela(t));
+}
+
 async function sincronizar(opcoes = {}) {
   if (!apiConfigurada()) { atualizarStatus("sem-config"); return false; }
   if (App.syncOcupado) return false;
@@ -206,7 +295,13 @@ async function sincronizar(opcoes = {}) {
   try {
     // 1) Envia primeiro o que está pendente neste aparelho.
     for (const tabela of [...App.tabelasPendentes]) {
-      await chamarApi("salvarTabela", { tabela, linhas: App.db[tabela] });
+      const linhasParaEnvio = tabela === "produtos"
+        ? App.db.produtos.map(p => ({
+            ...p,
+            composicao: (p.composicao || []).map(c => `${c.id_insumo}(${c.quantidade})`).join(", ")
+          }))
+        : App.db[tabela];
+      await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvio });
       App.tabelasPendentes.delete(tabela);
       salvarPendentesLocal();
     }
@@ -217,6 +312,16 @@ async function sincronizar(opcoes = {}) {
       // Tabela com alteração local pendente nunca é sobrescrita.
       if (Array.isArray(dados[t]) && !App.tabelasPendentes.has(t)) App.db[t] = dados[t];
     });
+    // Desserializar composição dos produtos (string da planilha → array)
+    if (Array.isArray(App.db.produtos)) {
+      App.db.produtos = App.db.produtos.map(p => ({
+        ...p,
+        composicao: typeof p.composicao === "string"
+          ? parseComposicao(p.composicao, App.db.insumos)
+          : (p.composicao || [])
+      }));
+    }
+    migrarIds();
     if (JSON.stringify(App.db) !== antes) {
       salvarDbLocal();
       if (!estaEditando() || opcoes.forcar) renderizarRotaAtual();

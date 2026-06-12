@@ -30,6 +30,7 @@ function cartaoVendaHtml(v) {
   return `
     <button type="button" class="cartao-venda" data-venda="${esc(v.id_venda)}">
       <div class="cartao-info">
+        <span class="venda-numero">#${esc(v.id_venda)}</span>
         <strong>${esc(v.cliente_nome || "Cliente não informado")}</strong>
         <small>${dataHora(v.data)} · ${qtdItens} ${qtdItens > 1 ? "itens" : "item"}${v.pagamento ? " · " + esc(v.pagamento) : ""}</small>
       </div>
@@ -38,6 +39,32 @@ function cartaoVendaHtml(v) {
         <span class="selo selo-${classeStatus}">${esc(v.status || "Concluída")}</span>
       </div>
     </button>`;
+}
+
+function calcularCustoVenda(venda) {
+  return (venda?.itens || []).reduce((total, item) => {
+    const produto = App.db.produtos.find(p => p.id === item.produto_id);
+    return total + (produto?.composicao || []).reduce((c, comp) => {
+      const insumo = App.db.insumos.find(i => i.id === comp.id_insumo);
+      return c + (insumo ? numero(insumo.custo) * numero(comp.quantidade) * numero(item.quantidade) : 0);
+    }, 0);
+  }, 0);
+}
+
+function revertirBaixaVenda(venda) {
+  let mudou = false;
+  (venda?.itens || []).forEach(item => {
+    const produto = App.db.produtos.find(p => p.id === item.produto_id);
+    (produto?.composicao || []).forEach(comp => {
+      const insumo = App.db.insumos.find(i => i.id === comp.id_insumo);
+      if (insumo) {
+        insumo.quantidade = numero(insumo.quantidade) + numero(comp.quantidade) * numero(item.quantidade);
+        insumo.atualizado_em = new Date().toISOString();
+        mudou = true;
+      }
+    });
+  });
+  return mudou;
 }
 
 function renderListaVendas(el) {
@@ -101,6 +128,10 @@ function abrirDetalheVenda(idVenda, aoMudar) {
   if (!venda) return;
   let mudou = false;
 
+  const custo = calcularCustoVenda(venda);
+  const lucro = venda.total - custo;
+  const margem = venda.total > 0 ? Math.round((lucro / venda.total) * 100) : 0;
+
   const corpo = document.createElement("div");
   corpo.innerHTML = `
     <div class="resumo-venda">
@@ -113,6 +144,11 @@ function abrirDetalheVenda(idVenda, aoMudar) {
       <div class="linha"><span class="suave">Data</span><span>${dataHora(venda.data)}</span></div>
       <div class="linha"><span class="suave">Registrada por</span><span>${esc(venda.criado_por || "—")}</span></div>
       ${venda.entrega ? `<div class="linha"><span class="suave">Entrega/obs.</span><span>${esc(venda.entrega)}</span></div>` : ""}
+    </div>
+    <div class="venda-stats">
+      <div class="venda-stat-linha"><span>Custo dos insumos</span><span>${dinheiro(custo)}</span></div>
+      <div class="venda-stat-linha"><span>Faturamento</span><span>${dinheiro(venda.total)}</span></div>
+      <div class="venda-stat-linha lucro"><span>Lucro</span><span>${dinheiro(lucro)} (${margem}%)</span></div>
     </div>
     <div class="formulario" style="margin-top:14px">
       <div class="meio">
@@ -127,10 +163,13 @@ function abrirDetalheVenda(idVenda, aoMudar) {
           </select>
         </label>
       </div>
-      <button type="button" class="btn btn-perigo" id="detalhe-excluir">Excluir venda</button>
+      <div class="linha-botoes">
+        <button type="button" class="btn btn-perigo" id="detalhe-excluir">Excluir</button>
+        <button type="button" class="btn btn-secundario" id="detalhe-editar">Editar venda</button>
+      </div>
     </div>`;
 
-  const modal = abrirModal(`Venda de ${venda.cliente_nome || "cliente não informado"}`, corpo, {
+  const modal = abrirModal(`Venda #${esc(venda.id_venda)} — ${esc(venda.cliente_nome || "cliente não informado")}`, corpo, {
     aoFechar: () => { if (mudou && aoMudar) aoMudar(); },
   });
 
@@ -145,14 +184,188 @@ function abrirDetalheVenda(idVenda, aoMudar) {
 
   $("#detalhe-status", corpo).addEventListener("change", (e) => aplicarMudanca("status", e.target.value));
   $("#detalhe-pagamento", corpo).addEventListener("change", (e) => aplicarMudanca("pagamento", e.target.value));
+  $("#detalhe-editar", corpo).addEventListener("click", () => {
+    modal.fechar();
+    abrirEditarVenda(idVenda, () => { mudou = true; if (aoMudar) aoMudar(); });
+  });
   $("#detalhe-excluir", corpo).addEventListener("click", async () => {
     const ok = await confirmar("Excluir esta venda? Os itens serão removidos da planilha.", { perigo: true, botao: "Excluir" });
     if (!ok) return;
+    if (revertirBaixaVenda(venda)) salvarTabela("insumos");
     App.db.vendas = App.db.vendas.filter((linha) => (linha.id_venda || linha.id) !== idVenda);
     salvarTabela("vendas");
     mudou = true;
     toast("Venda excluída.");
     modal.fechar();
+  });
+}
+
+function abrirEditarVenda(idVenda, aoMudar) {
+  const vendaAgrupada = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
+  if (!vendaAgrupada) return;
+
+  let editItens = vendaAgrupada.itens.map(i => ({
+    produto_id: i.produto_id,
+    produto_nome: i.produto_nome,
+    quantidade: numero(i.quantidade),
+    preco_unit: numero(i.preco_unit),
+    subtotal: numero(i.subtotal),
+  }));
+
+  const dataLocal = new Date(vendaAgrupada.data).toISOString().slice(0, 16);
+
+  const corpo = document.createElement("div");
+  corpo.innerHTML = `
+    <form class="formulario" id="form-editar-venda">
+      <label class="rotulo">Data
+        <input class="campo" name="data" type="datetime-local" value="${esc(dataLocal)}" required>
+      </label>
+      <label class="rotulo">Cliente
+        <input class="campo" name="cliente_nome" list="edit-lista-clientes" value="${esc(vendaAgrupada.cliente_nome || "")}" autocomplete="off">
+        <datalist id="edit-lista-clientes">
+          ${App.db.clientes.map(c => `<option value="${esc(c.nome)}">`).join("")}
+        </datalist>
+      </label>
+      <div class="meio">
+        <label class="rotulo">Pagamento
+          <select class="campo" name="pagamento">
+            ${CONFIG.formasPagamento.map(f => `<option ${f === vendaAgrupada.pagamento ? "selected" : ""}>${esc(f)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="rotulo">Status
+          <select class="campo" name="status">
+            ${CONFIG.statusVenda.map(s => `<option ${s === vendaAgrupada.status ? "selected" : ""}>${esc(s)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <label class="rotulo">Entrega / observações
+        <input class="campo" name="entrega" value="${esc(vendaAgrupada.entrega || "")}">
+      </label>
+      <div class="posicao-relativa" style="margin-bottom:6px">
+        <input class="campo-busca" id="edit-pdv-busca" placeholder="Adicionar produto…" autocomplete="off">
+        <div id="edit-pdv-sugestoes" class="sugestoes oculto"></div>
+      </div>
+      <div id="edit-pdv-itens" class="pdv-itens" style="margin-bottom:10px"></div>
+      <div class="pdv-total"><span>Total</span><strong id="edit-pdv-total">${dinheiro(vendaAgrupada.total)}</strong></div>
+      <div class="linha-botoes" style="margin-top:14px">
+        <button type="submit" class="btn btn-primario">Salvar alterações</button>
+      </div>
+    </form>`;
+
+  const modal = abrirModal(`Editar venda #${esc(idVenda)}`, corpo);
+
+  function renderEditItens() {
+    const area = $("#edit-pdv-itens", corpo);
+    area.innerHTML = editItens.length
+      ? editItens.map((item, i) => `
+          <div class="pdv-item" data-indice="${i}">
+            <span class="pdv-item-nome">${esc(item.produto_nome)}</span>
+            <input type="number" min="0" step="any" inputmode="decimal" value="${item.quantidade}" data-campo="quantidade" aria-label="Quantidade">
+            <input type="number" min="0" step="any" inputmode="decimal" value="${item.preco_unit}" data-campo="preco_unit" aria-label="Preço">
+            <span class="pdv-item-sub">${dinheiro(item.subtotal)}</span>
+            <button type="button" class="pdv-remover" aria-label="Remover">&times;</button>
+          </div>`).join("")
+      : `<p class="vazio">Nenhum item.</p>`;
+    $("#edit-pdv-total", corpo).textContent = dinheiro(editItens.reduce((s, i) => s + i.subtotal, 0));
+  }
+  renderEditItens();
+
+  // Busca de produtos para adicionar
+  const editBusca = $("#edit-pdv-busca", corpo);
+  const editSugestoes = $("#edit-pdv-sugestoes", corpo);
+  editBusca.addEventListener("input", () => {
+    const texto = editBusca.value.trim();
+    if (!texto) { editSugestoes.classList.add("oculto"); return; }
+    const matches = App.db.produtos.filter(p => ehAtivo(p) && contemTexto(p.nome, texto)).slice(0, 8);
+    if (!matches.length) { editSugestoes.classList.add("oculto"); return; }
+    editSugestoes.innerHTML = matches.map(p => `
+      <button type="button" class="sugestao" data-id="${esc(p.id)}">
+        <span>${esc(p.nome)}</span><small>${dinheiro(p.preco)}</small>
+      </button>`).join("");
+    editSugestoes.classList.remove("oculto");
+  });
+  editBusca.addEventListener("blur", () => setTimeout(() => editSugestoes.classList.add("oculto"), 150));
+  editSugestoes.addEventListener("click", e => {
+    const btn = e.target.closest(".sugestao[data-id]");
+    if (!btn) return;
+    const p = App.db.produtos.find(p => p.id === btn.dataset.id);
+    if (!p) return;
+    editItens.push({ produto_id: p.id, produto_nome: p.nome, quantidade: 1, preco_unit: numero(p.preco), subtotal: numero(p.preco) });
+    editBusca.value = "";
+    editSugestoes.classList.add("oculto");
+    renderEditItens();
+  });
+
+  $("#edit-pdv-itens", corpo).addEventListener("input", e => {
+    const linha = e.target.closest(".pdv-item");
+    const campo = e.target.dataset.campo;
+    if (!linha || !campo) return;
+    const item = editItens[Number(linha.dataset.indice)];
+    item[campo] = numero(e.target.value);
+    item.subtotal = numero(item.quantidade) * numero(item.preco_unit);
+    $(".pdv-item-sub", linha).textContent = dinheiro(item.subtotal);
+    $("#edit-pdv-total", corpo).textContent = dinheiro(editItens.reduce((s, i) => s + i.subtotal, 0));
+  });
+
+  $("#edit-pdv-itens", corpo).addEventListener("click", e => {
+    if (!e.target.closest(".pdv-remover")) return;
+    const linha = e.target.closest(".pdv-item");
+    editItens.splice(Number(linha.dataset.indice), 1);
+    renderEditItens();
+  });
+
+  $("#form-editar-venda", corpo).addEventListener("submit", e => {
+    e.preventDefault();
+    if (!editItens.length) { toast("Adicione ao menos um item.", "erro"); return; }
+    const dados = new FormData(e.target);
+    const novaData = new Date(dados.get("data")).toISOString();
+    const nomeCliente = String(dados.get("cliente_nome")).trim();
+    const clienteCadastrado = App.db.clientes.find(c => semAcentos(c.nome) === semAcentos(nomeCliente));
+
+    // Reverter baixa original
+    if (revertirBaixaVenda(vendaAgrupada)) salvarTabela("insumos");
+
+    // Substituir linhas da venda
+    App.db.vendas = App.db.vendas.filter(v => (v.id_venda || v.id) !== idVenda);
+    editItens.forEach((item, idx) => {
+      App.db.vendas.push({
+        id: `${idVenda}-${idx + 1}`,
+        id_venda: idVenda,
+        data: novaData,
+        cliente_id: clienteCadastrado?.id || "",
+        cliente_nome: nomeCliente,
+        produto_id: item.produto_id,
+        produto_nome: item.produto_nome,
+        quantidade: numero(item.quantidade),
+        preco_unit: numero(item.preco_unit),
+        subtotal: numero(item.subtotal),
+        pagamento: String(dados.get("pagamento")),
+        status: String(dados.get("status")),
+        entrega: String(dados.get("entrega")).trim(),
+        observacoes: "",
+        criado_por: vendaAgrupada.criado_por || App.usuario.usuario,
+        criado_em: vendaAgrupada.itens[0]?.criado_em || novaData,
+      });
+    });
+
+    // Aplicar nova baixa
+    let insumosMudaram = false;
+    editItens.forEach(item => {
+      const produto = App.db.produtos.find(p => p.id === item.produto_id);
+      (produto?.composicao || []).forEach(comp => {
+        const insumo = App.db.insumos.find(i => i.id === comp.id_insumo);
+        if (insumo) {
+          insumo.quantidade = numero(insumo.quantidade) - numero(comp.quantidade) * numero(item.quantidade);
+          insumo.atualizado_em = new Date().toISOString();
+          insumosMudaram = true;
+        }
+      });
+    });
+    if (insumosMudaram) salvarTabela("insumos");
+    salvarTabela("vendas");
+    toast("Venda atualizada.");
+    modal.fechar();
+    if (aoMudar) aoMudar();
   });
 }
 
@@ -399,12 +612,12 @@ function renderPdv(el) {
       const acao = e.target.closest("button")?.dataset.acao;
       if (acao === "voltar") modal.fechar();
       if (acao === "confirmar") {
-        const idVenda = uid("vd");
+        const idVenda = gerarIdVenda();
         const agora = new Date().toISOString();
         const clienteCadastrado = App.db.clientes.find((c) => semAcentos(c.nome) === semAcentos(nomeCliente));
-        pdvItens.forEach((item) => {
+        pdvItens.forEach((item, idx) => {
           App.db.vendas.push({
-            id: uid("vi"),
+            id: `${idVenda}-${idx + 1}`,
             id_venda: idVenda,
             data: agora,
             cliente_id: clienteCadastrado?.id || "",

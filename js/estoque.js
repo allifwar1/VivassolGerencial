@@ -33,11 +33,22 @@ function renderListaInsumos(el) {
         <button type="button" class="btn btn-secundario" id="abrir-conferencia">Conferência</button>
       </div>
       <input id="insumos-busca" class="campo-busca" placeholder="Buscar item…" autocomplete="off">
+      <div class="sort-bar">
+        <select class="campo" id="sort-campo" style="flex:1">
+          <option value="nome">Nome</option>
+          <option value="quantidade">Quantidade</option>
+          <option value="custo">Custo</option>
+        </select>
+        <button type="button" class="btn-sort" id="btn-sort-dir" data-dir="asc" title="Ordem">↑</button>
+        <button type="button" class="btn btn-secundario btn-estoque-baixo" id="btn-baixo">Estoque baixo</button>
+      </div>
       <div class="chips" id="insumos-categorias"></div>
       <div class="lista" id="insumos-lista"></div>
     </div>`;
 
   let categoria = "todas";
+  let sortDir = "asc";
+  let filtroBaixo = false;
 
   function montarChips() {
     const area = $("#insumos-categorias", el);
@@ -50,9 +61,17 @@ function renderListaInsumos(el) {
 
   function atualizarLista() {
     const busca = $("#insumos-busca", el).value.trim();
-    let itens = [...App.db.insumos].sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+    const sortCampo = $("#sort-campo", el).value;
+    let itens = [...App.db.insumos];
     if (categoria !== "todas") itens = itens.filter((i) => String(i.categoria || "").trim() === categoria);
-    if (busca) itens = itens.filter((i) => contemTexto(i.nome, busca));
+    if (busca) itens = itens.filter((i) => contemTexto(i.nome, busca) || contemTexto(i.categoria, busca));
+    if (filtroBaixo) itens = itens.filter((i) => numero(i.quantidade) <= numero(i.estoque_minimo));
+    const dir = sortDir === "asc" ? 1 : -1;
+    itens.sort((a, b) => {
+      if (sortCampo === "quantidade") return dir * (numero(a.quantidade) - numero(b.quantidade));
+      if (sortCampo === "custo") return dir * (numero(a.custo) - numero(b.custo));
+      return dir * String(a.nome).localeCompare(String(b.nome), "pt-BR");
+    });
     $("#insumos-lista", el).innerHTML = itens.length
       ? itens.map((i) => {
           const baixo = numero(i.quantidade) <= numero(i.estoque_minimo);
@@ -68,12 +87,25 @@ function renderListaInsumos(el) {
               </div>
             </button>`;
         }).join("")
-      : `<p class="vazio">Nenhum item de estoque${busca ? " encontrado" : " cadastrado ainda"}.</p>`;
+      : `<p class="vazio">Nenhum item${busca ? " encontrado" : filtroBaixo ? " com estoque baixo" : " cadastrado ainda"}.</p>`;
   }
 
   $("#insumo-novo", el).addEventListener("click", () => formInsumo(null, () => { montarChips(); atualizarLista(); }));
   $("#abrir-conferencia", el).addEventListener("click", () => renderConferencia(el));
   $("#insumos-busca", el).addEventListener("input", atualizarLista);
+  $("#sort-campo", el).addEventListener("change", atualizarLista);
+  $("#btn-sort-dir", el).addEventListener("click", () => {
+    const btn = $("#btn-sort-dir", el);
+    sortDir = sortDir === "asc" ? "desc" : "asc";
+    btn.dataset.dir = sortDir;
+    btn.textContent = sortDir === "asc" ? "↑" : "↓";
+    atualizarLista();
+  });
+  $("#btn-baixo", el).addEventListener("click", () => {
+    filtroBaixo = !filtroBaixo;
+    $("#btn-baixo", el).classList.toggle("ativo", filtroBaixo);
+    atualizarLista();
+  });
   $("#insumos-categorias", el).addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
     if (!chip) return;
@@ -135,7 +167,7 @@ function formInsumo(existente, aoMudar) {
     e.preventDefault();
     const dados = new FormData(e.target);
     const registro = {
-      id: existente?.id || uid("ins"),
+      id: existente?.id || gerarId("INS", "insumos"),
       nome: String(dados.get("nome")).trim(),
       categoria: String(dados.get("categoria")).trim(),
       unidade: String(dados.get("unidade")),

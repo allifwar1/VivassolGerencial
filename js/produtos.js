@@ -14,13 +14,28 @@ registrarModulo({
       <div class="pagina">
         <button type="button" class="btn btn-primario btn-grande btn-cheio" id="produto-novo">+ Novo produto</button>
         <input id="produtos-busca" class="campo-busca" placeholder="Buscar produto…" autocomplete="off">
+        <div class="sort-bar">
+          <select class="campo" id="sort-campo" style="flex:1">
+            <option value="nome">Nome</option>
+            <option value="preco">Preço</option>
+          </select>
+          <button type="button" class="btn-sort" id="btn-sort-dir" data-dir="asc" title="Ordem">↑</button>
+        </div>
         <div class="lista" id="produtos-lista"></div>
       </div>`;
 
+    let sortDir = "asc";
+
     function atualizarLista() {
       const busca = $("#produtos-busca", el).value.trim();
-      let produtos = [...App.db.produtos].sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+      const sortCampo = $("#sort-campo", el).value;
+      const dir = sortDir === "asc" ? 1 : -1;
+      let produtos = [...App.db.produtos];
       if (busca) produtos = produtos.filter((p) => contemTexto(p.nome, busca) || contemTexto(p.categoria, busca));
+      produtos.sort((a, b) => {
+        if (sortCampo === "preco") return dir * (numero(a.preco) - numero(b.preco));
+        return dir * String(a.nome).localeCompare(String(b.nome), "pt-BR");
+      });
       $("#produtos-lista", el).innerHTML = produtos.length
         ? produtos.map((p) => `
             <button type="button" class="cartao-item" data-id="${esc(p.id)}">
@@ -38,6 +53,14 @@ registrarModulo({
 
     $("#produto-novo", el).addEventListener("click", () => formProduto(null, atualizarLista));
     $("#produtos-busca", el).addEventListener("input", atualizarLista);
+    $("#sort-campo", el).addEventListener("change", atualizarLista);
+    $("#btn-sort-dir", el).addEventListener("click", () => {
+      const btn = $("#btn-sort-dir", el);
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+      btn.dataset.dir = sortDir;
+      btn.textContent = sortDir === "asc" ? "↑" : "↓";
+      atualizarLista();
+    });
     $("#produtos-lista", el).addEventListener("click", (e) => {
       const cartao = e.target.closest(".cartao-item");
       if (!cartao) return;
@@ -152,7 +175,7 @@ function formProduto(existente, aoMudar) {
     e.preventDefault();
     const dados = new FormData(e.target);
     const registro = {
-      id: existente?.id || uid("pro"),
+      id: existente?.id || gerarId("PRO", "produtos"),
       nome: String(dados.get("nome")).trim(),
       categoria: String(dados.get("categoria")).trim(),
       preco: numero(dados.get("preco")),

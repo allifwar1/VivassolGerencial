@@ -14,13 +14,23 @@ registrarModulo({
       <div class="pagina">
         <button type="button" class="btn btn-primario btn-grande btn-cheio" id="cliente-novo">+ Novo cliente</button>
         <input id="clientes-busca" class="campo-busca" placeholder="Buscar cliente…" autocomplete="off">
+        <div class="sort-bar">
+          <select class="campo" id="sort-campo" style="flex:1">
+            <option value="nome">Nome</option>
+          </select>
+          <button type="button" class="btn-sort" id="btn-sort-dir" data-dir="asc" title="Ordem">↑</button>
+        </div>
         <div class="lista" id="clientes-lista"></div>
       </div>`;
 
+    let sortDir = "asc";
+
     function atualizarLista() {
       const busca = $("#clientes-busca", el).value.trim();
-      let clientes = [...App.db.clientes].sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+      const dir = sortDir === "asc" ? 1 : -1;
+      let clientes = [...App.db.clientes];
       if (busca) clientes = clientes.filter((c) => contemTexto(c.nome, busca) || String(c.telefone || "").includes(busca));
+      clientes.sort((a, b) => dir * String(a.nome).localeCompare(String(b.nome), "pt-BR"));
       $("#clientes-lista", el).innerHTML = clientes.length
         ? clientes.map((c) => `
             <button type="button" class="cartao-item" data-id="${esc(c.id)}">
@@ -35,6 +45,14 @@ registrarModulo({
 
     $("#cliente-novo", el).addEventListener("click", () => formCliente(null, atualizarLista));
     $("#clientes-busca", el).addEventListener("input", atualizarLista);
+    $("#sort-campo", el).addEventListener("change", atualizarLista);
+    $("#btn-sort-dir", el).addEventListener("click", () => {
+      const btn = $("#btn-sort-dir", el);
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+      btn.dataset.dir = sortDir;
+      btn.textContent = sortDir === "asc" ? "↑" : "↓";
+      atualizarLista();
+    });
     $("#clientes-lista", el).addEventListener("click", (e) => {
       const whatsapp = e.target.closest("[data-whatsapp]");
       if (whatsapp) {
@@ -87,7 +105,7 @@ function formCliente(existente, aoMudar) {
     e.preventDefault();
     const dados = new FormData(e.target);
     const registro = {
-      id: existente?.id || uid("cli"),
+      id: existente?.id || gerarId("CLI", "clientes"),
       nome: String(dados.get("nome")).trim(),
       telefone: String(dados.get("telefone")).trim(),
       endereco: String(dados.get("endereco")).trim(),
