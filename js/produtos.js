@@ -51,6 +51,7 @@ registrarModulo({
 
 function formProduto(existente, aoMudar) {
   const categorias = [...new Set(App.db.produtos.map((p) => String(p.categoria || "").trim()).filter(Boolean))].sort();
+  let compTemp = (existente?.composicao || []).map((c) => ({ ...c }));
   const corpo = document.createElement("div");
   corpo.innerHTML = `
     <form class="formulario" id="form-produto">
@@ -75,6 +76,14 @@ function formProduto(existente, aoMudar) {
         <input type="checkbox" name="ativo" ${!existente || ehAtivo(existente) ? "checked" : ""}>
         Produto ativo (aparece na venda)
       </label>
+      <div>
+        <p class="rotulo" style="margin-bottom:6px">Composição <small style="font-weight:400;color:var(--texto-suave)">(insumos por unidade vendida)</small></p>
+        <div class="posicao-relativa" style="margin-bottom:6px">
+          <input class="campo-busca" id="comp-busca" placeholder="Buscar insumo…" autocomplete="off">
+          <div id="comp-sugestoes" class="sugestoes oculto"></div>
+        </div>
+        <div id="comp-lista" class="composicao-lista"></div>
+      </div>
       <div class="linha-botoes">
         ${existente ? `<button type="button" class="btn btn-perigo" id="produto-excluir">Excluir</button>` : ""}
         <button type="submit" class="btn btn-primario">Salvar</button>
@@ -82,6 +91,62 @@ function formProduto(existente, aoMudar) {
     </form>`;
 
   const modal = abrirModal(existente ? "Editar produto" : "Novo produto", corpo);
+
+  const compBusca = $("#comp-busca", corpo);
+  const compSugestoes = $("#comp-sugestoes", corpo);
+
+  function renderComposicao() {
+    $("#comp-lista", corpo).innerHTML = compTemp.length
+      ? compTemp.map((c, i) => `
+          <div class="composicao-item" data-indice="${i}">
+            <span class="composicao-nome">${esc(c.nome_insumo)}</span>
+            <input type="number" min="0" step="any" inputmode="decimal" value="${numero(c.quantidade)}" class="composicao-qtd" aria-label="Quantidade">
+            <span class="composicao-unidade">${esc(c.unidade || "")}</span>
+            <button type="button" class="pdv-remover" aria-label="Remover">&times;</button>
+          </div>`).join("")
+      : `<p class="composicao-vazio">Nenhum insumo adicionado.</p>`;
+  }
+  renderComposicao();
+
+  compBusca.addEventListener("input", () => {
+    const texto = compBusca.value.trim();
+    if (!texto) { compSugestoes.classList.add("oculto"); return; }
+    const matches = App.db.insumos
+      .filter((i) => contemTexto(i.nome, texto) && !compTemp.find((c) => c.id_insumo === i.id))
+      .slice(0, 6);
+    if (!matches.length) { compSugestoes.classList.add("oculto"); return; }
+    compSugestoes.innerHTML = matches.map((i) => `
+      <button type="button" class="sugestao" data-id="${esc(i.id)}">
+        <span>${esc(i.nome)}</span><small>${esc(i.unidade || "")}</small>
+      </button>`).join("");
+    compSugestoes.classList.remove("oculto");
+  });
+
+  compBusca.addEventListener("blur", () => setTimeout(() => compSugestoes.classList.add("oculto"), 150));
+
+  compSugestoes.addEventListener("click", (e) => {
+    const btn = e.target.closest(".sugestao[data-id]");
+    if (!btn) return;
+    const insumo = App.db.insumos.find((i) => i.id === btn.dataset.id);
+    if (!insumo) return;
+    compTemp.push({ id_insumo: insumo.id, nome_insumo: insumo.nome, quantidade: 1, unidade: insumo.unidade || "" });
+    compBusca.value = "";
+    compSugestoes.classList.add("oculto");
+    renderComposicao();
+  });
+
+  $("#comp-lista", corpo).addEventListener("input", (e) => {
+    const item = e.target.closest(".composicao-item");
+    if (!item) return;
+    compTemp[Number(item.dataset.indice)].quantidade = numero(e.target.value);
+  });
+
+  $("#comp-lista", corpo).addEventListener("click", (e) => {
+    if (!e.target.closest(".pdv-remover")) return;
+    const item = e.target.closest(".composicao-item");
+    compTemp.splice(Number(item.dataset.indice), 1);
+    renderComposicao();
+  });
 
   $("#form-produto", corpo).addEventListener("submit", (e) => {
     e.preventDefault();
@@ -94,6 +159,7 @@ function formProduto(existente, aoMudar) {
       unidade: String(dados.get("unidade")),
       ativo: dados.get("ativo") === "on",
       criado_em: existente?.criado_em || new Date().toISOString(),
+      composicao: compTemp.filter((c) => numero(c.quantidade) > 0),
     };
     if (!registro.nome) return;
     const indice = App.db.produtos.findIndex((p) => p.id === registro.id);
