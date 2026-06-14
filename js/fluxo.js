@@ -98,7 +98,7 @@ function renderFluxo(el) {
       const acao = acaoEl.dataset.acao;
       if (acao === "arrastar") return;
       if (acao === "pagamento") {
-        abrirPagamentoVenda(idVenda, refresh);
+        abrirMiniPagamento(idVenda, refresh);
         return;
       }
       if (acao === "anterior" || acao === "proximo") {
@@ -124,29 +124,19 @@ function renderFluxo(el) {
   });
 }
 
-/* Lê a posição de rolagem do quadro e de cada coluna (por status). */
+/* Lê a posição de rolagem horizontal do quadro. */
 function capturarRolagem(el) {
   const board = $("#board", el);
   if (!board) return null;
-  const colunas = {};
-  $$(".coluna-fluxo", board).forEach((sec) => {
-    const corpo = $(".coluna-corpo", sec);
-    if (corpo) colunas[sec.dataset.status] = corpo.scrollTop;
-  });
-  return { board: board.scrollLeft, colunas };
+  return { board: board.scrollLeft };
 }
 
-/* Devolve o quadro à posição guardada após uma re-renderização. */
+/* Devolve o quadro à posição horizontal guardada após uma re-renderização. */
 function restaurarRolagem(el, rolagem) {
   if (!rolagem) return;
   const board = $("#board", el);
   if (!board) return;
   board.scrollLeft = rolagem.board;
-  $$(".coluna-fluxo", board).forEach((sec) => {
-    const corpo = $(".coluna-corpo", sec);
-    const topo = rolagem.colunas[sec.dataset.status];
-    if (corpo && topo) corpo.scrollTop = topo;
-  });
 }
 
 function ordenarPorEntrega(a, b) {

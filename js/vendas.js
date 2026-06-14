@@ -143,7 +143,7 @@ function renderListaPedidos(el) {
     if (acao === "abrir") {
       abrirDetalheVenda(idVenda, atualizarLista);
     } else if (acao === "pagamento") {
-      abrirPagamentoVenda(idVenda, atualizarLista);
+      abrirMiniPagamento(idVenda, atualizarLista);
     } else if (acao === "status") {
       abrirSeletorStatus(idVenda, atualizarLista);
     }
@@ -232,7 +232,7 @@ function abrirDetalheVenda(idVenda, aoMudar) {
     $("#detalhe-status", corpo).addEventListener("click", () =>
       abrirSeletorStatus(idVenda, () => { mudou = true; render(); if (aoMudar) aoMudar(); }));
     $("#detalhe-pagamento", corpo).addEventListener("click", () =>
-      abrirPagamentoVenda(idVenda, () => { mudou = true; render(); if (aoMudar) aoMudar(); }));
+      abrirMiniPagamento(idVenda, () => { mudou = true; render(); if (aoMudar) aoMudar(); }));
     $("#detalhe-itens", corpo).addEventListener("change", (e) => {
       const chk = e.target.closest("input[data-item]");
       if (!chk) return;
@@ -329,17 +329,85 @@ function abrirPagamentoVenda(idVenda, aoMudar) {
   render();
 }
 
+/* Mini popup de pagamento: aparece ao clicar na badge de pagamento.
+   Mostra 3 opções (Não pago / Parcial / Pago). Dependendo da escolha,
+   pede forma + valor e registra no caixa, ou estorna tudo. */
+function abrirMiniPagamento(idVenda, aoMudar) {
+  const corpo = document.createElement("div");
+
+  function render() {
+    const v = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
+    if (!v) return;
+    corpo.innerHTML = `
+      <p class="suave" style="margin:0 0 12px;font-size:13px">
+        Total ${dinheiro(v.total)} · Recebido ${dinheiro(v.valor_pago)} · Saldo <strong>${dinheiro(v.saldo)}</strong>
+      </p>
+      <div class="mini-pag-opcoes">
+        <button type="button" class="opcao-pag op-nao-pago ${v.status_pagamento === "Não pago" ? "atual" : ""}" data-op="nao-pago">
+          Não pago${v.status_pagamento === "Não pago" ? " ✓" : ""}
+        </button>
+        <button type="button" class="opcao-pag op-parcial ${v.status_pagamento === "Parcial" ? "atual" : ""}" data-op="parcial">
+          Parcial${v.status_pagamento === "Parcial" ? " ✓" : ""}
+        </button>
+        <button type="button" class="opcao-pag op-pago ${v.status_pagamento === "Pago" ? "atual" : ""}" data-op="pago">
+          Pago${v.status_pagamento === "Pago" ? " ✓" : ""}
+        </button>
+      </div>
+      <p style="margin-top:10px;text-align:center">
+        <button type="button" class="btn btn-link" id="mini-ver-historico" style="font-size:13px;color:var(--texto-suave)">Ver histórico completo</button>
+      </p>`;
+
+    $("#mini-ver-historico", corpo).addEventListener("click", () => {
+      modal.fechar();
+      abrirPagamentoVenda(idVenda, aoMudar);
+    });
+
+    $$(".opcao-pag", corpo).forEach((btn) => btn.addEventListener("click", async () => {
+      const op = btn.dataset.op;
+      const vAtual = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
+      if (!vAtual) return;
+
+      if (op === "nao-pago") {
+        if (vAtual.valor_pago > 0.005) {
+          const ok = await confirmar(
+            `Estornar ${dinheiro(vAtual.valor_pago)} do caixa e marcar como não pago?`,
+            { perigo: true, botao: "Estornar tudo" });
+          if (!ok) return;
+          pagamentosDaVenda(idVenda).forEach((p) => estornarPagamento(p.id));
+          toast("Pagamentos estornados.");
+        }
+        modal.fechar();
+        if (aoMudar) aoMudar();
+        return;
+      }
+
+      if (op === "parcial" || op === "pago") {
+        if (vAtual.saldo < 0.005) {
+          toast("Pedido já está quitado. Para corrigir, estorne primeiro.", "erro");
+          return;
+        }
+        modal.fechar();
+        abrirReceberPagamento(idVenda, aoMudar, op === "pago" ? "pago" : "parcial");
+      }
+    }));
+  }
+
+  const modal = abrirModal(`Pagamento — pedido #${esc(idVenda)}`, corpo, { classe: "modal-pequeno" });
+  render();
+}
+
 /* Modal de recebimento: valor (já sugere o saldo), forma e, se sobrar
    saldo, uma nova data de vencimento. */
-function abrirReceberPagamento(idVenda, aoMudar) {
+function abrirReceberPagamento(idVenda, aoMudar, modo) {
   const v = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
   if (!v) return;
+  const valorDefault = modo === "parcial" ? "" : v.saldo.toFixed(2);
   const corpo = document.createElement("div");
   corpo.innerHTML = `
     <form class="formulario" id="form-receber">
       <p class="suave" style="margin:0 0 4px">Saldo a receber: <strong>${dinheiro(v.saldo)}</strong></p>
       <label class="rotulo">Valor recebido
-        <input class="campo campo-grande" name="valor" type="number" min="0" step="any" inputmode="decimal" value="${v.saldo.toFixed(2)}" required>
+        <input class="campo campo-grande" name="valor" type="number" min="0" step="any" inputmode="decimal" value="${valorDefault}" placeholder="${modo === "parcial" ? "Digite o valor recebido" : ""}" required>
       </label>
       <label class="rotulo">Forma de pagamento
         <select class="campo" name="forma">
@@ -608,7 +676,16 @@ function renderPdv(el, opcoes = {}) {
         <label class="rotulo oculto" id="pdv-prazo-area" for="pdv-vencimento">Pagar até
           <input id="pdv-vencimento" class="campo" type="date">
         </label>
-        <p class="pdv-aviso-pago" id="pdv-aviso-pago"></p>
+        <div id="pdv-recebido-area">
+          <label class="rotulo" for="pdv-recebido">Valor já recebido <span class="suave">(opcional)</span>
+            <input id="pdv-recebido" class="campo" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00">
+          </label>
+          <label class="rotulo oculto" id="pdv-recebido-forma-area">Recebido via
+            <select id="pdv-recebido-forma" class="campo">
+              ${CONFIG.formasPagamento.filter((f) => f !== CONFIG.formaPrazo).map((f) => `<option>${esc(f)}</option>`).join("")}
+            </select>
+          </label>
+        </div>
         <label class="rotulo" for="pdv-entrega-data">Data de entrega
           <input id="pdv-entrega-data" class="campo" type="date">
         </label>
@@ -677,24 +754,26 @@ function renderPdv(el, opcoes = {}) {
     cbusca.focus();
   }
 
-  /* ---- forma de pagamento: prazo mostra vencimento; à vista avisa que entra no caixa ---- */
+  /* ---- forma de pagamento: prazo mostra vencimento; recebi já recebido mostra forma ---- */
   function ehPrazo() { return pagamento.value === CONFIG.formaPrazo; }
   function atualizarAvisoPagamento() {
-    const prazoArea = $("#pdv-prazo-area", el);
-    const aviso = $("#pdv-aviso-pago", el);
-    prazoArea.classList.toggle("oculto", !ehPrazo());
-    if (ehOrcamento) { aviso.textContent = ""; return; }
-    if (ehPrazo()) {
-      aviso.textContent = "Fica como cobrança em aberto (não entra no caixa agora).";
-      aviso.className = "pdv-aviso-pago prazo";
-    } else {
-      aviso.textContent = `Será registrado como recebido em ${pagamento.value.toLowerCase().includes("dinheiro") ? "dinheiro vivo" : "banco"} e entra no caixa.`;
-      aviso.className = "pdv-aviso-pago pago";
-    }
+    $("#pdv-prazo-area", el).classList.toggle("oculto", !ehPrazo());
+    // Para orçamentos não há recebimento; para à-vista a forma já está selecionada acima.
+    const recebidoArea = $("#pdv-recebido-area", el);
+    if (recebidoArea) recebidoArea.classList.toggle("oculto", ehOrcamento);
+    atualizarRecebidoForma();
+  }
+  function atualizarRecebidoForma() {
+    const val = numero($("#pdv-recebido", el)?.value || "0");
+    const formaArea = $("#pdv-recebido-forma-area", el);
+    // Forma separada só é necessária em vendas a prazo (a forma principal é "Venda a prazo")
+    if (formaArea) formaArea.classList.toggle("oculto", val <= 0 || !ehPrazo());
   }
   pagamento.addEventListener("change", atualizarAvisoPagamento);
+  $("#pdv-recebido", el)?.addEventListener("input", atualizarRecebidoForma);
   renderClienteArea();
   atualizarAvisoPagamento();
+  atualizarRecebidoForma();
 
   let sugestoes = [];
   let selecionada = 0;
@@ -857,6 +936,11 @@ function renderPdv(el, opcoes = {}) {
     const vencimento = $("#pdv-vencimento", el).value;
     const obs = $("#pdv-obs", el).value.trim();
     const total = pdvItens.reduce((s, i) => s + i.subtotal, 0);
+    const recebidoInput = numero($("#pdv-recebido", el)?.value || "0");
+    const recebido = Math.min(recebidoInput, total);
+    const formaRecebido = ehPrazo()
+      ? ($("#pdv-recebido-forma", el)?.value || "Dinheiro")
+      : formaPagamento;
 
     // Regras do fiado: exige cliente real e data de vencimento.
     if (aPrazo && clienteSel.avista) {
@@ -880,9 +964,8 @@ function renderPdv(el, opcoes = {}) {
         ${dataEntrega ? `<div class="linha"><span class="suave">Entrega</span><span>${dataCurta(dataEntrega)}</span></div>` : ""}
         <div class="linha"><span class="suave">Pagamento</span><span>${esc(formaPagamento)}</span></div>
         ${aPrazo ? `<div class="linha"><span class="suave">Pagar até</span><span>${dataCurta(vencimento)}</span></div>` : ""}
-        ${ehOrcamento ? "" : aPrazo
-          ? `<div class="linha"><span class="suave">Caixa</span><span>cobrança em aberto</span></div>`
-          : `<div class="linha"><span class="suave">Caixa</span><span>entra agora (${destinoDaForma(formaPagamento) === "dinheiro" ? "dinheiro" : "banco"})</span></div>`}
+        ${!ehOrcamento && recebido > 0 ? `<div class="linha"><span class="suave">Já recebido</span><span>${dinheiro(recebido)} via ${esc(formaRecebido)} → caixa</span></div>` : ""}
+        ${!ehOrcamento && recebido <= 0 ? `<div class="linha"><span class="suave">Caixa</span><span>nada recebido ainda</span></div>` : ""}
       </div>
       <div class="linha-botoes">
         <button type="button" class="btn btn-secundario" data-acao="voltar">Voltar</button>
@@ -936,10 +1019,9 @@ function renderPdv(el, opcoes = {}) {
           if (aplicarBaixaVenda(vNova)) salvarTabela("insumos");
         }
 
-        // Venda à vista (não orçamento, não a prazo): recebida na hora,
-        // entra no caixa e marca o pedido como pago.
-        if (!ehOrcamento && !aPrazo) {
-          registrarPagamento(idVenda, { valor: total, forma: formaPagamento });
+        // Registra o valor já recebido (se informado), independente de ser prazo ou à vista.
+        if (!ehOrcamento && recebido > 0) {
+          registrarPagamento(idVenda, { valor: recebido, forma: formaRecebido });
         }
 
         pdvItens = [];
