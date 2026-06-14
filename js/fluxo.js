@@ -10,7 +10,12 @@
      sair da lista de Pedidos).
    ============================================================ */
 
-let fluxoEsc = 1; // escala (zoom) do quadro
+let fluxoEsc = 1;            // escala (zoom) do quadro
+let fluxoZoomManual = false; // true quando o usuário ajustou o zoom pelos botões +/-
+let fluxoCompacto = false;   // true = cartões sem checklist e data de entrega
+let _mirrorBar = null;       // barra de scroll espelho fixada no rodapé (desktop)
+let _mirrorObs = null;       // ResizeObserver da barra espelho
+let _telaPaisagem = false;   // true quando orientação travada em paisagem
 
 registrarModulo({
   id: "fluxo",
@@ -22,9 +27,9 @@ registrarModulo({
 });
 
 function renderFluxo(el) {
-  // Guarda a rolagem atual (horizontal do quadro e vertical de cada coluna)
-  // para restaurar depois de re-renderizar — assim a tela não "pula" para a
-  // esquerda quando se mexe num cartão.
+  // Remove a barra espelho do render anterior (será recriada se for desktop)
+  _destruirMirrorFluxo();
+
   const rolagem = capturarRolagem(el);
 
   const pedidos = agruparVendas(App.db.vendas).filter((v) => !v.arquivado);
@@ -33,7 +38,6 @@ function renderFluxo(el) {
   pedidos.forEach((v) => {
     (porStatus[v.status_producao] || (porStatus[v.status_producao] = [])).push(v);
   });
-  // Dentro da coluna, os mais urgentes (entrega mais próxima) primeiro.
   Object.values(porStatus).forEach((lista) => lista.sort(ordenarPorEntrega));
 
   el.innerHTML = `
@@ -42,32 +46,72 @@ function renderFluxo(el) {
         <div class="fluxo-zoom">
           <button type="button" class="btn-zoom" id="zoom-menos" aria-label="Diminuir">−</button>
           <button type="button" class="btn-zoom" id="zoom-mais" aria-label="Aumentar">+</button>
+          <button type="button" class="btn-zoom btn-zoom-auto" id="zoom-auto" title="Ajustar ao tamanho da tela" aria-label="Auto-ajustar">⊡</button>
         </div>
         <div class="fluxo-acoes">
+          <button type="button" class="btn btn-secundario btn-mini ${fluxoCompacto ? "ativo" : ""}" id="btn-compacto">⊟ Compacto</button>
+          <button type="button" class="btn btn-secundario btn-mini fluxo-btn-girar" id="btn-girar">🔄 Girar tela</button>
           <button type="button" class="btn btn-secundario btn-mini" id="limpar-entregues">Limpar entregues</button>
           <button type="button" class="btn btn-secundario btn-mini" id="limpar-cancelados">Limpar cancelados</button>
         </div>
       </div>
-      <p class="fluxo-dica-girar">Gire o celular na horizontal para ver melhor o quadro 🔄</p>
       <div class="board" id="board" style="--esc:${fluxoEsc}">
         ${CONFIG.statusProducao.map((s) => colunaHtml(s, porStatus[s] || [])).join("")}
       </div>
     </div>`;
 
   const board = $("#board", el);
+
+  // Auto-zoom para caber na tela (só se o usuário não ajustou manualmente)
+  if (!fluxoZoomManual) {
+    _autoZoomFluxo(el, board);
+  } else {
+    board.style.setProperty("--esc", String(fluxoEsc));
+  }
+
   restaurarRolagem(el, rolagem);
   const refresh = () => renderFluxo(el);
 
+  // Cria a barra de scroll espelho pregada no rodapé (apenas desktop/mouse)
+  _criarMirrorFluxo(board);
+
   /* ---- zoom ---- */
-  const aplicarZoom = () => board.style.setProperty("--esc", String(fluxoEsc));
-  $("#zoom-mais", el).addEventListener("click", () => { fluxoEsc = Math.min(1.8, fluxoEsc + 0.15); aplicarZoom(); });
-  $("#zoom-menos", el).addEventListener("click", () => { fluxoEsc = Math.max(0.6, fluxoEsc - 0.15); aplicarZoom(); });
+  const aplicarZoom = () => {
+    board.style.setProperty("--esc", String(fluxoEsc));
+    _atualizarMirrorLargura(board);
+  };
+
+  $("#zoom-mais", el).addEventListener("click", () => {
+    fluxoZoomManual = true;
+    fluxoEsc = Math.min(1.8, fluxoEsc + 0.15);
+    aplicarZoom();
+  });
+  $("#zoom-menos", el).addEventListener("click", () => {
+    fluxoZoomManual = true;
+    fluxoEsc = Math.max(0.4, fluxoEsc - 0.15);
+    aplicarZoom();
+  });
+  $("#zoom-auto", el).addEventListener("click", () => {
+    fluxoZoomManual = false;
+    _autoZoomFluxo(el, board);
+    _atualizarMirrorLargura(board);
+  });
   board.addEventListener("wheel", (e) => {
-    if (!e.ctrlKey) return; // zoom só com Ctrl + roda (não atrapalha o scroll normal)
+    if (!e.ctrlKey) return;
     e.preventDefault();
-    fluxoEsc = Math.min(1.8, Math.max(0.6, fluxoEsc - Math.sign(e.deltaY) * 0.1));
+    fluxoZoomManual = true;
+    fluxoEsc = Math.min(1.8, Math.max(0.4, fluxoEsc - Math.sign(e.deltaY) * 0.1));
     aplicarZoom();
   }, { passive: false });
+
+  /* ---- modo compacto ---- */
+  $("#btn-compacto", el).addEventListener("click", () => {
+    fluxoCompacto = !fluxoCompacto;
+    refresh();
+  });
+
+  /* ---- girar tela ---- */
+  $("#btn-girar", el).addEventListener("click", () => _toggleOrientacao($("#btn-girar", el)));
 
   /* ---- limpar colunas finais ---- */
   $("#limpar-entregues", el).addEventListener("click", () => limparColuna("Entregue", refresh));
@@ -91,7 +135,6 @@ function renderFluxo(el) {
     const card = e.target.closest(".card-fluxo");
     if (!card) return;
     const idVenda = card.dataset.venda;
-    // Cliques no checklist são tratados pelo evento "change".
     if (e.target.closest(".card-itens")) return;
     const acaoEl = e.target.closest("[data-acao]");
     if (acaoEl) {
@@ -122,6 +165,78 @@ function renderFluxo(el) {
     const li = chk.closest(".card-item");
     if (li) li.classList.toggle("ok", pronto);
   });
+}
+
+/* Calcula o zoom ideal para que todas as colunas caibam na largura disponível. */
+function _autoZoomFluxo(el, board) {
+  const disponivel = el.clientWidth - 24;
+  if (disponivel < 100) return;
+  const numCols = CONFIG.statusProducao.length;
+  const gaps = (numCols - 1) * 12;
+  // Largura efetiva de cada coluna = 17em * --esc; com 1em = 14px * --esc
+  // → largura = 238 * esc². Resolvo: numCols * 238 * esc² + gaps = disponivel
+  const esc = Math.sqrt(Math.max(0, disponivel - gaps) / (numCols * 238));
+  fluxoEsc = Math.min(1.4, Math.max(0.4, esc));
+  board.style.setProperty("--esc", String(fluxoEsc));
+}
+
+/* Cria uma barra de scroll horizontal fixada no rodapé da janela (desktop). */
+function _criarMirrorFluxo(board) {
+  if (!window.matchMedia("(pointer: fine)").matches) return;
+
+  const bar = document.createElement("div");
+  bar.className = "mirror-scroll-bar";
+  bar.appendChild(Object.assign(document.createElement("div"), {
+    className: "mirror-scroll-inner",
+  }));
+  document.body.appendChild(bar);
+  _mirrorBar = bar;
+  _atualizarMirrorLargura(board);
+
+  let sync = false;
+  board.addEventListener("scroll", () => {
+    if (sync || !document.contains(board)) return;
+    sync = true; bar.scrollLeft = board.scrollLeft; sync = false;
+  });
+  bar.addEventListener("scroll", () => {
+    if (sync || !document.contains(board)) return;
+    sync = true; board.scrollLeft = bar.scrollLeft; sync = false;
+  });
+
+  _mirrorObs = new ResizeObserver(() => _atualizarMirrorLargura(board));
+  _mirrorObs.observe(board);
+}
+
+function _atualizarMirrorLargura(board) {
+  if (!_mirrorBar) return;
+  const inner = _mirrorBar.querySelector(".mirror-scroll-inner");
+  if (inner) inner.style.width = board.scrollWidth + "px";
+}
+
+function _destruirMirrorFluxo() {
+  if (_mirrorBar) { _mirrorBar.remove(); _mirrorBar = null; }
+  if (_mirrorObs) { _mirrorObs.disconnect(); _mirrorObs = null; }
+}
+
+/* Trava / destrava orientação paisagem no celular. */
+async function _toggleOrientacao(btn) {
+  if (!screen.orientation?.lock) {
+    toast("Gire o celular manualmente para ver o quadro melhor. 🔄");
+    return;
+  }
+  try {
+    if (_telaPaisagem) {
+      screen.orientation.unlock();
+      _telaPaisagem = false;
+      btn.textContent = "🔄 Girar tela";
+    } else {
+      await screen.orientation.lock("landscape");
+      _telaPaisagem = true;
+      btn.textContent = "↩ Voltar retrato";
+    }
+  } catch (e) {
+    toast("Gire o celular manualmente para ver o quadro melhor. 🔄");
+  }
 }
 
 /* Lê a posição de rolagem horizontal do quadro. */
@@ -169,7 +284,7 @@ function cardFluxoHtml(v) {
   const finalizado = v.status_producao === "Entregue" || v.status_producao === "Cancelado";
   const classeAlerta = sit === "atrasado" ? "card-atrasado" : sit === "hoje" ? "card-hoje" : "";
   return `
-    <article class="card-fluxo ${classeAlerta}" data-venda="${esc(v.id_venda)}" data-status-atual="${esc(v.status_producao)}">
+    <article class="card-fluxo ${classeAlerta}${fluxoCompacto ? " card-compacto" : ""}" data-venda="${esc(v.id_venda)}" data-status-atual="${esc(v.status_producao)}">
       <div class="card-cab">
         <button type="button" class="card-handle" data-acao="arrastar" aria-label="Arrastar pedido">⠿</button>
         <span class="card-id">#${esc(v.id_venda)}${v.tipo === "Orçamento" ? " · orç." : ""}</span>

@@ -979,8 +979,16 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   color: var(--texto);
   cursor: pointer;
 }
+.btn-zoom-auto { font-size: 16px; }
 
 .fluxo-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* "Compacto" ativo fica destacado */
+.btn-secundario.ativo { background: var(--verde); color: #fff; border-color: var(--verde); }
+
+/* Botão girar tela só aparece em touch (mobile) */
+.fluxo-btn-girar { display: none; }
+@media (pointer: coarse) { .fluxo-btn-girar { display: inline-flex; } }
 .btn-mini { padding: 8px 12px; font-size: 13px; }
 .btn-link { border: none; background: none; cursor: pointer; text-decoration: underline; padding: 0; }
 
@@ -1029,6 +1037,10 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   color: #fff;
   font-weight: 800;
   font-size: 0.95em;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-radius: 14px 14px 0 0;
 }
 
 .coluna-contagem {
@@ -1053,6 +1065,28 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 }
 
 .coluna-vazia { text-align: center; color: var(--texto-suave); padding: 1.4em 0; font-size: 0.9em; }
+
+/* Modo compacto: esconde checklist e data de entrega */
+.card-fluxo.card-compacto .card-entrega,
+.card-fluxo.card-compacto .card-itens { display: none; }
+.card-fluxo.card-compacto { gap: 0.2em; }
+
+/* Barra de scroll espelho fixada no rodapé (só desktop/mouse) */
+.mirror-scroll-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  z-index: 300;
+  background: var(--superficie, #f5f5f5);
+  border-top: 1px solid var(--borda);
+}
+.mirror-scroll-inner { height: 1px; }
+@media (min-width: 900px) { .mirror-scroll-bar { left: 232px; } }
+@media (pointer: coarse) { .mirror-scroll-bar { display: none; } }
 
 /* ---------------- cartão do quadro ---------------- */
 
