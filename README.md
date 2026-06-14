@@ -72,8 +72,15 @@ adicionadas **ao final** da aba, então os dados antigos não saem do lugar.
 
 Para que essas colunas sincronizem entre os aparelhos, abra a planilha em
 **Extensões → Apps Script**, cole novamente o `apps-script/Code.gs`
-atualizado e execute **configurarPlanilha** mais uma vez. Isso só adiciona
-os cabeçalhos novos — nenhum dado existente é apagado.
+atualizado e clique em **Implantar → Gerenciar implantações → editar
+(lápis) → Versão: Nova versão → Implantar**. Isso publica o código novo no
+mesmo endereço `/exec`.
+
+A partir desta versão o Apps Script **conserta o cabeçalho sozinho**: na
+primeira gravação ele acrescenta ao final da aba as colunas que faltarem,
+sem apagar nenhum dado (executar **configurarPlanilha** uma vez deixa tudo
+pronto de imediato). Enquanto a planilha não estiver atualizada, o próprio
+aparelho preserva a etapa do pedido localmente para nada se perder.
 
 ## Pedidos e fluxo de produção
 

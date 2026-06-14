@@ -366,10 +366,31 @@ async function sincronizar(opcoes = {}) {
         .map(p => [p.id, p.composicao])
     );
 
+    // Preservar os campos novos de pedido/fluxo. Se a planilha ainda não tem
+    // essas colunas (cabeçalho antigo), os valores voltam vazios e a etapa
+    // do pedido se perderia — então guardamos por id de item e restauramos.
+    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado"];
+    const pedidoLocal = new Map(
+      (App.db.vendas || []).map(linha => [linha.id, linha])
+    );
+
     TABELAS.forEach((t) => {
       // Tabela com alteração local pendente nunca é sobrescrita.
       if (Array.isArray(dados[t]) && !App.tabelasPendentes.has(t)) App.db[t] = dados[t];
     });
+
+    // Restaura campos de pedido que a planilha não devolveu (cabeçalho antigo).
+    if (Array.isArray(App.db.vendas)) {
+      App.db.vendas.forEach(linha => {
+        const local = pedidoLocal.get(linha.id);
+        if (!local) return;
+        CAMPOS_PEDIDO.forEach(campo => {
+          const daPlanilha = linha[campo];
+          const vazio = daPlanilha === undefined || daPlanilha === null || daPlanilha === "";
+          if (vazio && local[campo] !== undefined && local[campo] !== "") linha[campo] = local[campo];
+        });
+      });
+    }
     // Desserializar composição dos produtos (string da planilha → array)
     // Se a planilha tiver composição usa ela; senão, preserva a versão local
     if (Array.isArray(App.db.produtos)) {
@@ -755,6 +776,7 @@ function renderizarRotaAtual() {
   if (!modulo) return;
   $("#topo-titulo").textContent = modulo.titulo;
   const conteudo = $("#conteudo");
+  conteudo.dataset.rota = App.rota; // permite ao CSS dar layout próprio (ex.: Fluxo em tela cheia)
   conteudo.innerHTML = "";
   const parametros = App.parametrosRota;
   App.parametrosRota = null; // parâmetros valem só para a primeira renderização

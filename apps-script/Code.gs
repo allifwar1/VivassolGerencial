@@ -160,12 +160,15 @@ function salvarTabela(nome, linhas) {
   try {
     const planilha = SpreadsheetApp.getActive();
     let aba = planilha.getSheetByName(nome);
-    if (!aba) {
-      aba = planilha.insertSheet(nome);
-      aba.getRange(1, 1, 1, ABAS[nome].length).setValues([ABAS[nome]]).setFontWeight("bold");
-      aba.setFrozenRows(1);
-    }
+    if (!aba) aba = planilha.insertSheet(nome);
     const cabecalho = ABAS[nome];
+
+    // Garante que a linha de cabeçalho tenha TODAS as colunas atuais
+    // (inclusive as novas de pedido/fluxo). Sem isso, os dados gravados em
+    // colunas sem cabeçalho não voltam na leitura — e o status muda no
+    // aparelho mas "não atualiza" na planilha. Conserta-se sozinho, sem
+    // precisar reexecutar configurarPlanilha.
+    garantirCabecalho(aba, cabecalho);
 
     // Limpa os dados antigos (mantém o cabeçalho).
     const ultimaLinha = aba.getLastRow();
@@ -189,6 +192,28 @@ function salvarTabela(nome, linhas) {
   } finally {
     trava.releaseLock();
   }
+}
+
+/* Garante que a linha 1 da aba tenha exatamente as colunas esperadas,
+   na ordem certa. Reescreve o cabeçalho só quando há diferença, então é
+   barato chamar a cada gravação. Os dados existentes não saem do lugar
+   porque as colunas novas entram sempre ao FINAL (ver ABAS.vendas). */
+function garantirCabecalho(aba, cabecalho) {
+  const colunasAtuais = Math.max(aba.getLastColumn(), cabecalho.length);
+  const atual = aba.getLastColumn() >= 1
+    ? aba.getRange(1, 1, 1, colunasAtuais).getValues()[0].map(String)
+    : [];
+  let precisa = false;
+  for (let i = 0; i < cabecalho.length; i++) {
+    if (atual[i] !== cabecalho[i]) { precisa = true; break; }
+  }
+  if (!precisa) return;
+  aba.getRange(1, 1, 1, cabecalho.length)
+    .setValues([cabecalho])
+    .setFontWeight("bold")
+    .setBackground("#2E7D32")
+    .setFontColor("#FFFFFF");
+  aba.setFrozenRows(1);
 }
 
 /* Aba painel_BD: resumo informativo para quem abre a planilha. */

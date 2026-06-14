@@ -949,6 +949,13 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
    FLUXO — quadro Kanban
    ============================================================ */
 
+/* O quadro usa toda a largura disponível (sem o limite de 1000px do
+   conteúdo) e ocupa a altura útil da tela. */
+#conteudo[data-rota="fluxo"] {
+  max-width: none;
+  padding: 12px 12px 0;
+}
+
 .pagina-fluxo { display: flex; flex-direction: column; gap: 10px; }
 
 .fluxo-barra {

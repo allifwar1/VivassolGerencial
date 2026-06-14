@@ -22,6 +22,11 @@ registrarModulo({
 });
 
 function renderFluxo(el) {
+  // Guarda a rolagem atual (horizontal do quadro e vertical de cada coluna)
+  // para restaurar depois de re-renderizar — assim a tela não "pula" para a
+  // esquerda quando se mexe num cartão.
+  const rolagem = capturarRolagem(el);
+
   const pedidos = agruparVendas(App.db.vendas).filter((v) => !v.arquivado);
   const porStatus = {};
   CONFIG.statusProducao.forEach((s) => (porStatus[s] = []));
@@ -50,6 +55,7 @@ function renderFluxo(el) {
     </div>`;
 
   const board = $("#board", el);
+  restaurarRolagem(el, rolagem);
   const refresh = () => renderFluxo(el);
 
   /* ---- zoom ---- */
@@ -116,6 +122,31 @@ function renderFluxo(el) {
     const pronto = alternarItemPronto(chk.dataset.item);
     const li = chk.closest(".card-item");
     if (li) li.classList.toggle("ok", pronto);
+  });
+}
+
+/* Lê a posição de rolagem do quadro e de cada coluna (por status). */
+function capturarRolagem(el) {
+  const board = $("#board", el);
+  if (!board) return null;
+  const colunas = {};
+  $$(".coluna-fluxo", board).forEach((sec) => {
+    const corpo = $(".coluna-corpo", sec);
+    if (corpo) colunas[sec.dataset.status] = corpo.scrollTop;
+  });
+  return { board: board.scrollLeft, colunas };
+}
+
+/* Devolve o quadro à posição guardada após uma re-renderização. */
+function restaurarRolagem(el, rolagem) {
+  if (!rolagem) return;
+  const board = $("#board", el);
+  if (!board) return;
+  board.scrollLeft = rolagem.board;
+  $$(".coluna-fluxo", board).forEach((sec) => {
+    const corpo = $(".coluna-corpo", sec);
+    const topo = rolagem.colunas[sec.dataset.status];
+    if (corpo && topo) corpo.scrollTop = topo;
   });
 }
 
