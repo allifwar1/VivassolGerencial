@@ -710,9 +710,9 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 .toast.visivel { opacity: 1; transform: translateY(0); }
 .toast-erro { background: var(--vermelho); }
 
-/* ---------------- computador (>= 900px) ---------------- */
-
-@media (min-width: 900px) {
+/* ---------------- computador (>= 900px, mouse) ---------------- */
+/* pointer: fine = mouse/trackpad; exclui celulares em modo paisagem */
+@media (min-width: 900px) and (pointer: fine) {
   #app { display: flex; }
 
   #nav-lateral {
@@ -1026,13 +1026,16 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 }
 
 /* ---- celular: colunas em tamanho normal, cartões não transbordam ---- */
-@media (max-width: 899px) {
+/* (pointer: coarse) cobre celulares em paisagem com largura > 899px também */
+@media (max-width: 899px), (pointer: coarse) {
   /* overflow-x: clip corta horizontalmente sem quebrar o cabeçalho fixo (sticky) */
   .coluna-fluxo { overflow-x: clip; }
   /* o seletor de ordenação ocupa a linha inteira, fácil de tocar */
   .fluxo-ordenar-rotulo { width: 100%; }
   .fluxo-ordenar-rotulo .campo-mini { flex: 1; }
   .fluxo-acoes { width: 100%; }
+  /* espaço no final do board para a barra de navegação inferior não cobrir o último card */
+  .board { padding-bottom: calc(var(--altura-nav) + env(safe-area-inset-bottom) + 16px); }
 }
 
 .board {
@@ -1114,7 +1117,7 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   border-top: 1px solid var(--borda);
 }
 .mirror-scroll-inner { height: 1px; }
-@media (min-width: 900px) { .mirror-scroll-bar { left: 232px; } }
+@media (min-width: 900px) and (pointer: fine) { .mirror-scroll-bar { left: 232px; } }
 @media (pointer: coarse) { .mirror-scroll-bar { display: none; } }
 
 /* ---------------- cartão do quadro ---------------- */
