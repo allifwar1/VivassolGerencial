@@ -402,10 +402,12 @@ function abrirReceberPagamento(idVenda, aoMudar, modo) {
   const v = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
   if (!v) return;
   const valorDefault = modo === "parcial" ? "" : v.saldo.toFixed(2);
+  // Campo "pagar até" só faz sentido em vendas a prazo (onde se espera pagar depois).
+  const isPrazo = v.pagamento === CONFIG.formaPrazo;
   const corpo = document.createElement("div");
   corpo.innerHTML = `
     <form class="formulario" id="form-receber">
-      <p class="suave" style="margin:0 0 4px">Saldo a receber: <strong>${dinheiro(v.saldo)}</strong></p>
+      <p class="suave" style="margin:0 0 4px">Em aberto: <strong>${dinheiro(v.saldo)}</strong> · Pago: ${dinheiro(v.valor_pago)}</p>
       <label class="rotulo">Valor recebido
         <input class="campo campo-grande" name="valor" type="number" min="0" step="any" inputmode="decimal" value="${valorDefault}" placeholder="${modo === "parcial" ? "Digite o valor recebido" : ""}" required>
       </label>
@@ -414,9 +416,10 @@ function abrirReceberPagamento(idVenda, aoMudar, modo) {
           ${CONFIG.formasPagamento.filter((f) => f !== CONFIG.formaPrazo).map((f) => `<option>${esc(f)}</option>`).join("")}
         </select>
       </label>
+      ${isPrazo ? `
       <label class="rotulo">Se sobrar saldo, pagar até
         <input class="campo" name="vencimento" type="date" value="${esc(v.data_vencimento || "")}">
-      </label>
+      </label>` : ""}
       <button type="submit" class="btn btn-primario btn-cheio" style="margin-top:8px">Confirmar recebimento</button>
     </form>`;
   const modal = abrirModal("Receber pagamento", corpo, { classe: "modal-pequeno" });
@@ -426,9 +429,9 @@ function abrirReceberPagamento(idVenda, aoMudar, modo) {
     const atual = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
     let valor = numero(dados.get("valor"));
     if (valor <= 0) { toast("Informe um valor maior que zero.", "erro"); return; }
-    if (valor > atual.saldo + 0.005) valor = atual.saldo; // não recebe mais que o saldo
+    if (valor > atual.saldo + 0.005) valor = atual.saldo;
     const restante = atual.saldo - valor;
-    const novoVenc = restante > 0.005 ? String(dados.get("vencimento") || "") : "";
+    const novoVenc = isPrazo && restante > 0.005 ? String(dados.get("vencimento") || "") : "";
     registrarPagamento(idVenda, { valor, forma: String(dados.get("forma")), novoVencimento: novoVenc });
     toast("Pagamento registrado!");
     modal.fechar();

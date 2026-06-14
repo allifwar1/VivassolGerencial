@@ -1321,6 +1321,41 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 .detalhe-saldo.vencido { background: var(--vermelho-claro); color: var(--vermelho); }
 
 /* cobranças */
+.cob-filtros {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.cob-filtros .campo-busca { flex: 1; min-width: 160px; }
+.cob-filtros .campo-mini { flex-shrink: 0; }
+
+.cob-secao { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.cob-secao-titulo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 800;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--texto-suave);
+  padding: 0 2px 4px;
+  border-bottom: 2px solid var(--amarelo);
+}
+.cob-secao-titulo-outros { border-bottom-color: var(--vermelho); }
+.cob-secao-total { font-size: 14px; color: var(--texto); }
+.cob-secao-aviso {
+  font-size: 12.5px;
+  color: var(--texto-suave);
+  background: var(--vermelho-claro);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 0;
+}
+.cob-secao-outros .cobranca-cliente { border-left-color: var(--vermelho); }
+
 .cobranca-cliente { background: var(--cartao); border: 1px solid var(--borda); border-left: 4px solid var(--amarelo); border-radius: 14px; padding: 12px; box-shadow: var(--sombra); }
 .cobranca-cliente.tem-atraso { border-left-color: var(--vermelho); }
 .cobranca-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
