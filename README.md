@@ -17,7 +17,8 @@ Vivassol Gerencial V2/
 │   ├── config.js         ← ÚNICO arquivo que precisa ser editado
 │   ├── core.js           ← núcleo: sincronização, login, navegação
 │   ├── inicio.js         ← painel do dia
-│   ├── vendas.js         ← lista de vendas + PDV (nova venda)
+│   ├── vendas.js         ← lista de pedidos + criação (pedido/orçamento)
+│   ├── fluxo.js          ← quadro de fluxo (Kanban) dos pedidos
 │   ├── estoque.js        ← insumos + conferência de estoque
 │   ├── clientes.js       ← clientes
 │   ├── produtos.js       ← produtos vendidos
@@ -62,6 +63,32 @@ próprio computador, dá para abrir o `index.html` direto no navegador.
 1. Abra o endereço do site no Chrome.
 2. Menu ⋮ → **Adicionar à tela inicial**.
 3. O sistema abre como um aplicativo, sem a barra do navegador.
+
+### Atualização: pedidos e fluxo de produção
+
+Esta versão acrescentou colunas novas na aba **vendas** (tipo, data de
+entrega, etapa de produção, situação de pagamento etc.). As colunas foram
+adicionadas **ao final** da aba, então os dados antigos não saem do lugar.
+
+Para que essas colunas sincronizem entre os aparelhos, abra a planilha em
+**Extensões → Apps Script**, cole novamente o `apps-script/Code.gs`
+atualizado e execute **configurarPlanilha** mais uma vez. Isso só adiciona
+os cabeçalhos novos — nenhum dado existente é apagado.
+
+## Pedidos e fluxo de produção
+
+- Cada venda agora é um **pedido**, que pode nascer como **Orçamento** ou
+  **Pedido**. O orçamento não dá baixa no estoque; vira pedido ao avançar.
+- Cada pedido tem uma **etapa de produção** (Cancelado, Orçamento, Pedido
+  feito, Em produção, Pronto, Entregue) e uma **situação de pagamento**
+  (Não pago, Parcial, Pago).
+- A tela **Fluxo** mostra o quadro Kanban: arraste o cartão pela alça,
+  use as setas ‹ › ou abra o pedido para mudar de etapa. Pedidos
+  entregues/cancelados podem sair do quadro (continuam na lista de Pedidos).
+- Ao mover para **Entregue** sem estar pago, ou **Cancelar** um pedido já
+  pago/parcial, o sistema avisa antes de confirmar.
+- Pelo botão do **WhatsApp** dá para enviar (ou copiar) a mensagem do
+  pedido/orçamento já formatada para o cliente.
 
 ## Login
 

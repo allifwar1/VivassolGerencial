@@ -27,6 +27,16 @@ const CONFIG = {
   formasPagamento: ["Pix", "Dinheiro", "Cartão de débito", "Cartão de crédito", "Fiado"],
   statusVenda: ["Concluída", "Pendente", "Cancelada"],
   unidades: ["un", "kg", "g", "L", "ml", "cx", "pct"],
+
+  // Etapas de produção do pedido (ordem do quadro de fluxo, da esquerda
+  // para a direita). "Cancelado" fica à esquerda; "Entregue" é a última.
+  statusProducao: ["Cancelado", "Orçamento", "Pedido feito", "Em produção", "Pronto", "Entregue"],
+
+  // Situação do pagamento (o botão cicla nesta ordem).
+  statusPagamento: ["Não pago", "Parcial", "Pago"],
+
+  // Código do país para montar o link do WhatsApp (Brasil = 55).
+  paisWhatsapp: "55",
 };
 
 // Mesmos usuários e senhas do sistema antigo (hash SHA-256 da senha).

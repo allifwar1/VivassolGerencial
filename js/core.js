@@ -80,6 +80,41 @@ function dataHora(iso) {
     " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+/* Interpreta "YYYY-MM-DD" no fuso local (evita o pulo de um dia que o
+   new Date() causa ao tratar a data como UTC). Outros formatos passam direto. */
+function parseData(iso) {
+  if (!iso) return null;
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(iso);
+  return isNaN(d) ? null : d;
+}
+
+/* Data curta "14/06" (mostra o ano só quando for diferente do atual). */
+function dataCurta(iso) {
+  const d = parseData(iso);
+  if (!d) return "";
+  const opc = { day: "2-digit", month: "2-digit" };
+  if (d.getFullYear() !== new Date().getFullYear()) opc.year = "2-digit";
+  return d.toLocaleDateString("pt-BR", opc);
+}
+
+/* Devolve "" (sem data), "hoje", "atrasado" ou "futuro" para uma data de
+   entrega, considerando apenas o dia (ignora horário). */
+function situacaoEntrega(iso, statusProducao) {
+  const d = parseData(iso);
+  if (!d) return "";
+  // Pedidos já entregues ou cancelados não disparam alerta de prazo.
+  if (statusProducao === "Entregue" || statusProducao === "Cancelado") return "";
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const alvo = new Date(d);
+  alvo.setHours(0, 0, 0, 0);
+  if (alvo.getTime() === hoje.getTime()) return "hoje";
+  if (alvo.getTime() < hoje.getTime()) return "atrasado";
+  return "futuro";
+}
+
 function semAcentos(texto) {
   // Remove acentos: "Açúcar" -> "acucar" (faixa ̀-ͯ = acentos combinantes)
   return String(texto ?? "").toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "");
@@ -133,6 +168,9 @@ function icone(caminho) {
 const ICONES = {
   inicio: icone('<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/>'),
   vendas: icone('<circle cx="9" cy="20" r="1.6"/><circle cx="17" cy="20" r="1.6"/><path d="M3 4h2l2.6 12h10.8L21 8H6"/>'),
+  fluxo: icone('<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/>'),
+  whatsapp: icone('<path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 1 1 21 11.5z"/>'),
+  copiar: icone('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>'),
   estoque: icone('<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5"/><path d="M12 12v9"/>'),
   clientes: icone('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.4 3.4-5 6.5-5s5.8 1.6 6.5 5"/><path d="M16 5.3a3.5 3.5 0 0 1 0 5.4"/><path d="M18.5 15.4c1.7.8 2.8 2.3 3 4.6"/>'),
   produtos: icone('<path d="M3 11V4h7l10 10-7 7L3 11z"/><circle cx="7.5" cy="8.5" r="1.4"/>'),
@@ -479,7 +517,217 @@ function agruparVendas(linhas) {
     venda.itens.push(linha);
     venda.total += numero(linha.subtotal);
   });
+  // Preenche os campos derivados de produção/pagamento a partir da 1ª linha.
+  mapa.forEach((venda) => {
+    const base = venda.itens[0] || {};
+    venda.tipo = tipoDe(base);
+    venda.data_entrega = base.data_entrega || "";
+    venda.cliente_id = base.cliente_id || "";
+    venda.status_producao = statusProducaoDe(base);
+    venda.status_pagamento = statusPagamentoDe(base);
+    venda.valor_pago = base.valor_pago || "";
+    venda.arquivado = String(base.arquivado || "").toLowerCase() === "sim";
+  });
   return [...mapa.values()].sort((a, b) => String(b.data).localeCompare(String(a.data)));
+}
+
+/* ---------------- status de produção e pagamento ---------------- */
+
+/* Lê o status de produção de uma linha; se for um registro antigo (sem o
+   campo), deriva do antigo "status" (Concluída/Pendente/Cancelada). */
+function statusProducaoDe(linha) {
+  const s = String(linha?.status_producao || "").trim();
+  if (CONFIG.statusProducao.includes(s)) return s;
+  const antigo = String(linha?.status || "").trim();
+  if (antigo === "Cancelada") return "Cancelado";
+  if (antigo === "Concluída") return "Entregue";
+  return "Pedido feito";
+}
+
+function statusPagamentoDe(linha) {
+  const s = String(linha?.status_pagamento || "").trim();
+  if (CONFIG.statusPagamento.includes(s)) return s;
+  // Registro antigo: "Fiado" sem status = não pago; concluído = pago.
+  if (String(linha?.pagamento || "") === "Fiado") return "Não pago";
+  return String(linha?.status || "") === "Concluída" ? "Pago" : "Não pago";
+}
+
+function tipoDe(linha) {
+  const t = String(linha?.tipo || "").trim();
+  if (t === "Orçamento" || t === "Pedido") return t;
+  return statusProducaoDe(linha) === "Orçamento" ? "Orçamento" : "Pedido";
+}
+
+/* Slug usado nas classes de CSS: "Em produção" -> "em-producao". */
+function slugStatus(status) {
+  return semAcentos(status).replace(/\s+/g, "-");
+}
+
+/* Um pedido conta como venda (faturamento) quando não é orçamento nem
+   cancelado. Orçamentos e cancelados ficam de fora das estatísticas. */
+function contaComoVenda(statusProducao) {
+  return statusProducao !== "Orçamento" && statusProducao !== "Cancelado";
+}
+
+/* ---------------- mensagem de WhatsApp ---------------- */
+
+function textoMensagemPedido(venda) {
+  const ehOrcamento = venda.status_producao === "Orçamento" || venda.tipo === "Orçamento";
+  const nome = (venda.cliente_nome || "").trim().split(/\s+/)[0] || "tudo bem";
+  const linhas = [];
+  linhas.push(`Olá ${nome}! 😊`);
+  linhas.push(ehOrcamento ? "Segue o orçamento solicitado:" : "Segue a confirmação do seu pedido:");
+  linhas.push("");
+  venda.itens.forEach((i) => {
+    linhas.push(`• ${numero(i.quantidade)}x ${i.produto_nome} — ${dinheiro(i.subtotal)}`);
+  });
+  linhas.push("");
+  linhas.push(`💰 Total: ${dinheiro(venda.total)}`);
+  if (venda.data_entrega) linhas.push(`📅 Entrega prevista: ${dataCurta(venda.data_entrega)}`);
+  linhas.push("");
+  linhas.push("Qualquer dúvida estou à disposição!");
+  return linhas.join("\n");
+}
+
+function linkWhatsapp(venda) {
+  const texto = encodeURIComponent(textoMensagemPedido(venda));
+  const cliente = App.db.clientes.find((c) => c.id === venda.cliente_id) ||
+    App.db.clientes.find((c) => semAcentos(c.nome) === semAcentos(venda.cliente_nome || ""));
+  const digitos = String(cliente?.telefone || "").replace(/\D/g, "");
+  if (digitos.length >= 10) {
+    const numeroWpp = digitos.startsWith(CONFIG.paisWhatsapp) ? digitos : CONFIG.paisWhatsapp + digitos;
+    return `https://wa.me/${numeroWpp}?text=${texto}`;
+  }
+  return `https://wa.me/?text=${texto}`;
+}
+
+async function copiarTexto(texto) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(texto);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = texto;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ---------------- baixa de estoque por transição ---------------- */
+
+function aplicarBaixaVenda(venda) {
+  let mudou = false;
+  (venda?.itens || []).forEach((item) => {
+    const produto = App.db.produtos.find((p) => p.id === item.produto_id);
+    (produto?.composicao || []).forEach((comp) => {
+      const insumo = App.db.insumos.find((i) => i.id === comp.id_insumo);
+      if (insumo) {
+        insumo.quantidade = numero(insumo.quantidade) - numero(comp.quantidade) * numero(item.quantidade);
+        insumo.atualizado_em = new Date().toISOString();
+        mudou = true;
+      }
+    });
+  });
+  return mudou;
+}
+
+/* Ajusta o estoque ao mudar a etapa de produção: dá baixa quando o pedido
+   passa a valer como venda e devolve ao estoque quando deixa de valer. */
+function ajustarEstoquePorTransicao(venda, statusAntigo, statusNovo) {
+  const antesAtivo = contaComoVenda(statusAntigo);
+  const agoraAtivo = contaComoVenda(statusNovo);
+  if (!antesAtivo && agoraAtivo) return aplicarBaixaVenda(venda);
+  if (antesAtivo && !agoraAtivo) return revertirBaixaVenda(venda);
+  return false;
+}
+
+/* ---------------- ações sobre o pedido (compartilhadas) ---------------- */
+
+/* Move o pedido para outra etapa de produção, tratando os avisos de
+   "entregar sem pagar" e "cancelar pedido pago", e a baixa de estoque. */
+async function mudarStatusProducao(idVenda, novoStatus, opcoes = {}) {
+  const venda = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
+  if (!venda || venda.status_producao === novoStatus) return false;
+  const atual = venda.status_producao;
+
+  if (novoStatus === "Entregue" && venda.status_pagamento !== "Pago") {
+    const ok = await confirmar(
+      `Atenção: este pedido ainda não está pago (situação: ${venda.status_pagamento}). Marcar como entregue mesmo assim?`,
+      { titulo: "Pedido não pago", botao: "Entregar mesmo assim" });
+    if (!ok) return false;
+  }
+  if (novoStatus === "Cancelado" && (venda.status_pagamento === "Pago" || venda.status_pagamento === "Parcial")) {
+    const ok = await confirmar(
+      `Este pedido tem pagamento registrado (${venda.status_pagamento}). Lembre-se de devolver o valor ao cliente. Deseja cancelar?`,
+      { perigo: true, titulo: "Devolver ao cliente", botao: "Cancelar pedido" });
+    if (!ok) return false;
+  }
+
+  if (ajustarEstoquePorTransicao(venda, atual, novoStatus)) salvarTabela("insumos");
+
+  const statusCompat = novoStatus === "Cancelado" ? "Cancelada"
+    : novoStatus === "Entregue" ? "Concluída" : "Pendente";
+  App.db.vendas.forEach((linha) => {
+    if ((linha.id_venda || linha.id) === idVenda) {
+      linha.status_producao = novoStatus;
+      linha.status = statusCompat;
+      linha.tipo = novoStatus === "Orçamento" ? "Orçamento" : "Pedido";
+    }
+  });
+  salvarTabela("vendas");
+  if (!opcoes.silencioso) toast(`Pedido movido para "${novoStatus}".`);
+  if (opcoes.aoMudar) opcoes.aoMudar();
+  return true;
+}
+
+function mudarStatusPagamento(idVenda, novoStatus, opcoes = {}) {
+  App.db.vendas.forEach((linha) => {
+    if ((linha.id_venda || linha.id) === idVenda) linha.status_pagamento = novoStatus;
+  });
+  salvarTabela("vendas");
+  if (!opcoes.silencioso) toast(`Pagamento: ${novoStatus}.`);
+  if (opcoes.aoMudar) opcoes.aoMudar();
+}
+
+/* Avança o pagamento para o próximo estado (Não pago → Parcial → Pago). */
+function ciclarPagamento(idVenda, atual, opcoes = {}) {
+  const ordem = CONFIG.statusPagamento;
+  const proximo = ordem[(ordem.indexOf(atual) + 1) % ordem.length];
+  mudarStatusPagamento(idVenda, proximo, opcoes);
+  return proximo;
+}
+
+/* Marca/desmarca um item do pedido como pronto (checklist do card). */
+function alternarItemPronto(idItem, opcoes = {}) {
+  const linha = App.db.vendas.find((l) => l.id === idItem);
+  if (!linha) return false;
+  const novo = String(linha.item_pronto || "").toLowerCase() === "sim" ? "" : "sim";
+  linha.item_pronto = novo;
+  salvarTabela("vendas");
+  if (opcoes.aoMudar) opcoes.aoMudar();
+  return novo === "sim";
+}
+
+function itemEstaPronto(linha) {
+  return String(linha?.item_pronto || "").toLowerCase() === "sim";
+}
+
+/* Tira o pedido do quadro de fluxo (continua na lista de pedidos). */
+function arquivarPedido(idVenda, opcoes = {}) {
+  App.db.vendas.forEach((linha) => {
+    if ((linha.id_venda || linha.id) === idVenda) linha.arquivado = "sim";
+  });
+  salvarTabela("vendas");
+  if (!opcoes.silencioso) toast("Pedido removido do quadro.");
+  if (opcoes.aoMudar) opcoes.aoMudar();
 }
 
 /* ---------------- navegação ---------------- */

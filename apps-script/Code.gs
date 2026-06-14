@@ -27,9 +27,15 @@ const ABAS = {
   clientes: ["id", "nome", "telefone", "endereco", "observacoes", "criado_em"],
   produtos: ["id", "nome", "categoria", "preco", "unidade", "ativo", "criado_em", "composicao"],
   insumos: ["id", "nome", "categoria", "unidade", "quantidade", "estoque_minimo", "custo", "atualizado_em"],
+  // IMPORTANTE: as 16 primeiras colunas são as originais e NÃO mudam de
+  // posição (a planilha já tem dados nelas). As colunas de pedido/fluxo são
+  // acrescentadas ao FINAL, para que reexecutar configurarPlanilha apenas
+  // adicione cabeçalhos novos sem desalinhar os dados existentes.
   vendas: ["id", "id_venda", "data", "cliente_id", "cliente_nome", "produto_id", "produto_nome",
            "quantidade", "preco_unit", "subtotal", "pagamento", "status", "entrega",
-           "observacoes", "criado_por", "criado_em"],
+           "observacoes", "criado_por", "criado_em",
+           "tipo", "data_entrega", "item_pronto", "status_pagamento", "valor_pago",
+           "status_producao", "arquivado"],
 };
 
 // Abas que o site lê e grava (painel_BD é só informativa).

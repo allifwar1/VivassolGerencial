@@ -1,44 +1,58 @@
 "use strict";
 
 /* ============================================================
-   Módulo: Vendas
-   - Lista de vendas (agrupadas por id_venda) com filtros
-   - PDV "Nova venda": no computador o fluxo inteiro anda
-     com a tecla Enter; no celular, com toques.
-   O carrinho (pdvItens) sobrevive à navegação: se Karen sair
-   no meio da venda e voltar, os itens continuam lá.
+   Módulo: Pedidos (antiga "Vendas")
+   - Lista de pedidos (agrupados por id_venda) com filtros por
+     etapa de produção; cada cartão tem botões clicáveis para
+     mudar a etapa e o pagamento na hora.
+   - Criação de "Pedido" ou "Orçamento" pelo mesmo fluxo (PDV).
+   - Envio do pedido/orçamento pelo WhatsApp.
+   O id do módulo continua "vendas" e a tabela continua "vendas"
+   para não quebrar os dados já existentes na planilha.
    ============================================================ */
 
 let pdvItens = [];
 
 registrarModulo({
   id: "vendas",
-  titulo: "Vendas",
-  rotulo: "Vendas",
+  titulo: "Pedidos",
+  rotulo: "Pedidos",
   icone: "vendas",
   render(el, parametros) {
-    if (parametros?.abrirPdv) renderPdv(el);
-    else renderListaVendas(el);
+    if (parametros?.abrirPdv) renderPdv(el, { tipo: parametros.tipo || "Pedido" });
+    else renderListaPedidos(el);
   },
 });
 
-/* ---------------- lista de vendas ---------------- */
+/* ---------------- cartão de pedido (lista e início) ---------------- */
 
+/* Usado na lista de Pedidos e na tela inicial. As "badges" de etapa e
+   pagamento têm data-acao para serem clicáveis onde houver handler. */
 function cartaoVendaHtml(v) {
-  const classeStatus = { "Concluída": "ok", "Pendente": "atencao", "Cancelada": "perigo" }[v.status] || "ok";
+  const prod = v.status_producao;
+  const pag = v.status_pagamento;
   const qtdItens = v.itens.length;
+  const sit = situacaoEntrega(v.data_entrega, prod);
+  const entregaHtml = v.data_entrega
+    ? `<span class="pedido-entrega ${sit}">📅 ${dataCurta(v.data_entrega)}${sit === "hoje" ? " · hoje!" : sit === "atrasado" ? " · atrasado" : ""}</span>`
+    : "";
   return `
-    <button type="button" class="cartao-venda" data-venda="${esc(v.id_venda)}">
-      <div class="cartao-info">
-        <span class="venda-numero">#${esc(v.id_venda)}</span>
-        <strong>${esc(v.cliente_nome || "Cliente não informado")}</strong>
-        <small>${dataHora(v.data)} · ${qtdItens} ${qtdItens > 1 ? "itens" : "item"}${v.pagamento ? " · " + esc(v.pagamento) : ""}</small>
+    <div class="cartao-venda cartao-pedido" data-venda="${esc(v.id_venda)}">
+      <div class="pedido-badges">
+        <button type="button" class="badge-status prod-${slugStatus(prod)}" data-acao="status" data-venda="${esc(v.id_venda)}">${esc(prod)}</button>
+        <button type="button" class="badge-status badge-pag pag-${slugStatus(pag)}" data-acao="pagamento" data-venda="${esc(v.id_venda)}">${esc(pag)}</button>
       </div>
-      <div class="cartao-lado">
-        <strong>${dinheiro(v.total)}</strong>
-        <span class="selo selo-${classeStatus}">${esc(v.status || "Concluída")}</span>
+      <div class="pedido-corpo" data-acao="abrir" data-venda="${esc(v.id_venda)}">
+        <div class="cartao-info">
+          <span class="venda-numero">#${esc(v.id_venda)}${v.tipo === "Orçamento" ? " · Orçamento" : ""}</span>
+          <strong>${esc(v.cliente_nome || "Cliente não informado")}</strong>
+          <small>${dataHora(v.data)} · ${qtdItens} ${qtdItens > 1 ? "itens" : "item"} ${entregaHtml}</small>
+        </div>
+        <div class="cartao-lado">
+          <strong>${dinheiro(v.total)}</strong>
+        </div>
       </div>
-    </button>`;
+    </div>`;
 }
 
 function calcularCustoVenda(venda) {
@@ -67,61 +81,100 @@ function revertirBaixaVenda(venda) {
   return mudou;
 }
 
-function renderListaVendas(el) {
+/* ---------------- lista de pedidos ---------------- */
+
+function renderListaPedidos(el) {
   el.innerHTML = `
     <div class="pagina">
-      <button type="button" class="btn btn-primario btn-grande btn-cheio" id="vendas-nova">+ Nova venda</button>
-      <div class="chips" id="vendas-periodos">
-        <button type="button" class="chip" data-periodo="hoje">Hoje</button>
-        <button type="button" class="chip ativo" data-periodo="7">7 dias</button>
-        <button type="button" class="chip" data-periodo="30">30 dias</button>
-        <button type="button" class="chip" data-periodo="tudo">Tudo</button>
+      <div class="linha-acoes">
+        <button type="button" class="btn btn-primario" id="pedidos-novo">+ Novo pedido</button>
+        <button type="button" class="btn btn-secundario" id="pedidos-orcamento">Orçamento</button>
       </div>
-      <input id="vendas-busca" class="campo-busca" placeholder="Buscar por cliente…" autocomplete="off">
-      <div class="lista" id="vendas-lista"></div>
+      <div class="chips" id="pedidos-filtros">
+        <button type="button" class="chip ativo" data-filtro="ativos">Em aberto</button>
+        <button type="button" class="chip" data-filtro="Orçamento">Orçamentos</button>
+        <button type="button" class="chip" data-filtro="Entregue">Entregues</button>
+        <button type="button" class="chip" data-filtro="Cancelado">Cancelados</button>
+        <button type="button" class="chip" data-filtro="tudo">Tudo</button>
+      </div>
+      <input id="pedidos-busca" class="campo-busca" placeholder="Buscar por cliente…" autocomplete="off">
+      <div class="lista" id="pedidos-lista"></div>
     </div>`;
 
-  let periodo = "7";
+  let filtro = "ativos";
 
-  function vendasFiltradas() {
-    const busca = $("#vendas-busca", el).value.trim();
-    let vendas = agruparVendas(App.db.vendas);
-    if (periodo === "hoje") {
-      const hojeStr = new Date().toDateString();
-      vendas = vendas.filter((v) => new Date(v.data).toDateString() === hojeStr);
-    } else if (periodo !== "tudo") {
-      const limite = Date.now() - Number(periodo) * 24 * 60 * 60 * 1000;
-      vendas = vendas.filter((v) => new Date(v.data).getTime() >= limite);
+  function pedidosFiltrados() {
+    const busca = $("#pedidos-busca", el).value.trim();
+    let pedidos = agruparVendas(App.db.vendas);
+    if (filtro === "ativos") {
+      pedidos = pedidos.filter(v => v.status_producao !== "Entregue" && v.status_producao !== "Cancelado");
+    } else if (filtro !== "tudo") {
+      pedidos = pedidos.filter(v => v.status_producao === filtro);
     }
-    if (busca) vendas = vendas.filter((v) => contemTexto(v.cliente_nome, busca));
-    return vendas;
+    if (busca) pedidos = pedidos.filter(v => contemTexto(v.cliente_nome, busca));
+    return pedidos;
   }
 
   function atualizarLista() {
-    const vendas = vendasFiltradas();
-    const totalPeriodo = vendas.filter((v) => v.status !== "Cancelada").reduce((s, v) => s + v.total, 0);
-    $("#vendas-lista", el).innerHTML = vendas.length
-      ? `<p class="titulo-secao">${vendas.length} venda${vendas.length > 1 ? "s" : ""} · ${dinheiro(totalPeriodo)}</p>` +
-        vendas.map(cartaoVendaHtml).join("")
-      : `<p class="vazio">Nenhuma venda no período.</p>`;
+    const pedidos = pedidosFiltrados();
+    const totalPeriodo = pedidos.filter(v => contaComoVenda(v.status_producao)).reduce((s, v) => s + v.total, 0);
+    $("#pedidos-lista", el).innerHTML = pedidos.length
+      ? `<p class="titulo-secao">${pedidos.length} pedido${pedidos.length > 1 ? "s" : ""} · ${dinheiro(totalPeriodo)}</p>` +
+        pedidos.map(cartaoVendaHtml).join("")
+      : `<p class="vazio">Nenhum pedido aqui.</p>`;
   }
 
-  $("#vendas-nova", el).addEventListener("click", () => renderPdv(el));
-  $("#vendas-busca", el).addEventListener("input", atualizarLista);
-  $("#vendas-periodos", el).addEventListener("click", (e) => {
+  $("#pedidos-novo", el).addEventListener("click", () => renderPdv(el, { tipo: "Pedido" }));
+  $("#pedidos-orcamento", el).addEventListener("click", () => renderPdv(el, { tipo: "Orçamento" }));
+  $("#pedidos-busca", el).addEventListener("input", atualizarLista);
+  $("#pedidos-filtros", el).addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
     if (!chip) return;
-    periodo = chip.dataset.periodo;
-    $$(".chip", $("#vendas-periodos", el)).forEach((c) => c.classList.toggle("ativo", c === chip));
+    filtro = chip.dataset.filtro;
+    $$(".chip", $("#pedidos-filtros", el)).forEach(c => c.classList.toggle("ativo", c === chip));
     atualizarLista();
   });
-  $("#vendas-lista", el).addEventListener("click", (e) => {
-    const cartao = e.target.closest(".cartao-venda");
-    if (cartao) abrirDetalheVenda(cartao.dataset.venda, () => renderListaVendas(el));
+
+  $("#pedidos-lista", el).addEventListener("click", async (e) => {
+    const botao = e.target.closest("[data-acao]");
+    if (!botao) return;
+    const idVenda = botao.dataset.venda;
+    const acao = botao.dataset.acao;
+    if (acao === "abrir") {
+      abrirDetalheVenda(idVenda, atualizarLista);
+    } else if (acao === "pagamento") {
+      const venda = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
+      ciclarPagamento(idVenda, venda.status_pagamento, { aoMudar: atualizarLista });
+    } else if (acao === "status") {
+      abrirSeletorStatus(idVenda, atualizarLista);
+    }
   });
 
   atualizarLista();
 }
+
+/* Seletor rápido de etapa de produção (usado na lista e no detalhe). */
+function abrirSeletorStatus(idVenda, aoMudar) {
+  const venda = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
+  if (!venda) return;
+  const corpo = document.createElement("div");
+  corpo.innerHTML = `
+    <div class="seletor-status">
+      ${CONFIG.statusProducao.map(s => `
+        <button type="button" class="opcao-status prod-${slugStatus(s)} ${s === venda.status_producao ? "atual" : ""}" data-status="${esc(s)}">
+          ${esc(s)}${s === venda.status_producao ? " ✓" : ""}
+        </button>`).join("")}
+    </div>`;
+  const modal = abrirModal(`Etapa do pedido #${esc(idVenda)}`, corpo, { classe: "modal-pequeno" });
+  corpo.addEventListener("click", async (e) => {
+    const botao = e.target.closest(".opcao-status");
+    if (!botao) return;
+    modal.fechar();
+    await mudarStatusProducao(idVenda, botao.dataset.status, { aoMudar });
+  });
+}
+
+/* ---------------- detalhe do pedido ---------------- */
 
 function abrirDetalheVenda(idVenda, aoMudar) {
   const venda = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
@@ -133,83 +186,122 @@ function abrirDetalheVenda(idVenda, aoMudar) {
   const margem = venda.total > 0 ? Math.round((lucro / venda.total) * 100) : 0;
 
   const corpo = document.createElement("div");
-  corpo.innerHTML = `
-    <div class="resumo-venda">
-      ${venda.itens.map((i) => `
-        <div class="linha">
-          <span>${esc(i.quantidade)}x ${esc(i.produto_nome)}</span>
-          <span>${dinheiro(i.subtotal)}</span>
-        </div>`).join("")}
-      <div class="linha total"><span>Total</span><span>${dinheiro(venda.total)}</span></div>
-      <div class="linha"><span class="suave">Data</span><span>${dataHora(venda.data)}</span></div>
-      <div class="linha"><span class="suave">Registrada por</span><span>${esc(venda.criado_por || "—")}</span></div>
-      ${venda.entrega ? `<div class="linha"><span class="suave">Entrega/obs.</span><span>${esc(venda.entrega)}</span></div>` : ""}
-    </div>
-    <div class="venda-stats">
-      <div class="venda-stat-linha"><span>Custo dos insumos</span><span>${dinheiro(custo)}</span></div>
-      <div class="venda-stat-linha"><span>Faturamento</span><span>${dinheiro(venda.total)}</span></div>
-      <div class="venda-stat-linha lucro"><span>Lucro</span><span>${dinheiro(lucro)} (${margem}%)</span></div>
-    </div>
-    <div class="formulario" style="margin-top:14px">
-      <div class="meio">
-        <label class="rotulo">Status
-          <select class="campo" id="detalhe-status">
-            ${CONFIG.statusVenda.map((s) => `<option ${s === venda.status ? "selected" : ""}>${esc(s)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="rotulo">Pagamento
-          <select class="campo" id="detalhe-pagamento">
-            ${CONFIG.formasPagamento.map((f) => `<option ${f === venda.pagamento ? "selected" : ""}>${esc(f)}</option>`).join("")}
-          </select>
-        </label>
+
+  function render() {
+    const v = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
+    if (!v) { return; }
+    const sit = situacaoEntrega(v.data_entrega, v.status_producao);
+    corpo.innerHTML = `
+      <div class="detalhe-controles">
+        <button type="button" class="badge-status grande prod-${slugStatus(v.status_producao)}" id="detalhe-status">${esc(v.status_producao)}</button>
+        <button type="button" class="badge-status grande badge-pag pag-${slugStatus(v.status_pagamento)}" id="detalhe-pagamento">${esc(v.status_pagamento)}</button>
       </div>
-      <div class="linha-botoes">
+      ${v.data_entrega ? `<p class="detalhe-entrega ${sit}">Entrega prevista: <strong>${dataCurta(v.data_entrega)}</strong>${sit === "hoje" ? " — é hoje!" : sit === "atrasado" ? " — atrasado!" : ""}</p>` : ""}
+
+      <div class="checklist" id="detalhe-itens">
+        ${v.itens.map((i) => `
+          <label class="checklist-item ${itemEstaPronto(i) ? "pronto" : ""}">
+            <input type="checkbox" data-item="${esc(i.id)}" ${itemEstaPronto(i) ? "checked" : ""}>
+            <span class="checklist-texto">${esc(numero(i.quantidade))}x ${esc(i.produto_nome)}</span>
+            <span class="checklist-valor">${dinheiro(i.subtotal)}</span>
+          </label>`).join("")}
+      </div>
+
+      <div class="resumo-venda">
+        <div class="linha total"><span>Total</span><span>${dinheiro(v.total)}</span></div>
+        <div class="linha"><span class="suave">Data</span><span>${dataHora(v.data)}</span></div>
+        <div class="linha"><span class="suave">Registrado por</span><span>${esc(v.criado_por || "—")}</span></div>
+        ${v.entrega ? `<div class="linha"><span class="suave">Observações</span><span>${esc(v.entrega)}</span></div>` : ""}
+      </div>
+
+      <div class="venda-stats">
+        <div class="venda-stat-linha"><span>Custo dos insumos</span><span>${dinheiro(custo)}</span></div>
+        <div class="venda-stat-linha lucro"><span>Lucro</span><span>${dinheiro(lucro)} (${margem}%)</span></div>
+      </div>
+
+      <button type="button" class="btn btn-whatsapp btn-cheio" id="detalhe-whatsapp">
+        ${ICONES.whatsapp} Enviar pelo WhatsApp
+      </button>
+
+      <div class="linha-botoes" style="margin-top:12px">
         <button type="button" class="btn btn-perigo" id="detalhe-excluir">Excluir</button>
-        <button type="button" class="btn btn-secundario" id="detalhe-editar">Editar venda</button>
-      </div>
-    </div>`;
+        <button type="button" class="btn btn-secundario" id="detalhe-editar">Editar</button>
+      </div>`;
 
-  const modal = abrirModal(`Venda #${esc(venda.id_venda)} — ${esc(venda.cliente_nome || "cliente não informado")}`, corpo, {
-    aoFechar: () => { if (mudou && aoMudar) aoMudar(); },
-  });
-
-  function aplicarMudanca(campo, valor) {
-    App.db.vendas.forEach((linha) => {
-      if ((linha.id_venda || linha.id) === idVenda) linha[campo] = valor;
+    // O clique na etapa abre o seletor de etapas.
+    $("#detalhe-status", corpo).addEventListener("click", () =>
+      abrirSeletorStatus(idVenda, () => { mudou = true; render(); if (aoMudar) aoMudar(); }));
+    $("#detalhe-pagamento", corpo).addEventListener("click", () => {
+      const v2 = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
+      ciclarPagamento(idVenda, v2.status_pagamento, { aoMudar: () => { mudou = true; render(); if (aoMudar) aoMudar(); } });
     });
-    salvarTabela("vendas");
-    mudou = true;
-    toast("Venda atualizada.");
+    $("#detalhe-itens", corpo).addEventListener("change", (e) => {
+      const chk = e.target.closest("input[data-item]");
+      if (!chk) return;
+      alternarItemPronto(chk.dataset.item, { aoMudar: () => { mudou = true; render(); } });
+    });
+    $("#detalhe-whatsapp", corpo).addEventListener("click", () => abrirEnvioWhatsapp(idVenda));
+    $("#detalhe-editar", corpo).addEventListener("click", () => {
+      modal.fechar();
+      abrirEditarVenda(idVenda, () => { mudou = true; if (aoMudar) aoMudar(); });
+    });
+    $("#detalhe-excluir", corpo).addEventListener("click", async () => {
+      const ok = await confirmar("Excluir este pedido? Ele será removido da planilha.", { perigo: true, botao: "Excluir" });
+      if (!ok) return;
+      const vAtual = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
+      if (contaComoVenda(vAtual.status_producao) && revertirBaixaVenda(vAtual)) salvarTabela("insumos");
+      App.db.vendas = App.db.vendas.filter((linha) => (linha.id_venda || linha.id) !== idVenda);
+      salvarTabela("vendas");
+      mudou = true;
+      toast("Pedido excluído.");
+      modal.fechar();
+    });
   }
 
-  $("#detalhe-status", corpo).addEventListener("change", (e) => aplicarMudanca("status", e.target.value));
-  $("#detalhe-pagamento", corpo).addEventListener("change", (e) => aplicarMudanca("pagamento", e.target.value));
-  $("#detalhe-editar", corpo).addEventListener("click", () => {
-    modal.fechar();
-    abrirEditarVenda(idVenda, () => { mudou = true; if (aoMudar) aoMudar(); });
+  const modal = abrirModal(`Pedido #${esc(venda.id_venda)} — ${esc(venda.cliente_nome || "cliente não informado")}`, corpo, {
+    aoFechar: () => { if (mudou && aoMudar) aoMudar(); },
   });
-  $("#detalhe-excluir", corpo).addEventListener("click", async () => {
-    const ok = await confirmar("Excluir esta venda? Os itens serão removidos da planilha.", { perigo: true, botao: "Excluir" });
-    if (!ok) return;
-    if (revertirBaixaVenda(venda)) salvarTabela("insumos");
-    App.db.vendas = App.db.vendas.filter((linha) => (linha.id_venda || linha.id) !== idVenda);
-    salvarTabela("vendas");
-    mudou = true;
-    toast("Venda excluída.");
-    modal.fechar();
+  render();
+}
+
+/* ---------------- envio por WhatsApp ---------------- */
+
+function abrirEnvioWhatsapp(idVenda) {
+  const venda = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
+  if (!venda) return;
+  const texto = textoMensagemPedido(venda);
+  const corpo = document.createElement("div");
+  corpo.innerHTML = `
+    <pre class="previa-mensagem">${esc(texto)}</pre>
+    <div class="linha-botoes" style="margin-top:14px; flex-direction:column">
+      <a class="btn btn-whatsapp btn-cheio" id="wpp-enviar" href="${esc(linkWhatsapp(venda))}" target="_blank" rel="noopener">
+        ${ICONES.whatsapp} Enviar no WhatsApp
+      </a>
+      <button type="button" class="btn btn-secundario btn-cheio" id="wpp-copiar">
+        ${ICONES.copiar} Copiar mensagem
+      </button>
+    </div>`;
+  abrirModal("Enviar para o cliente", corpo, { classe: "modal-pequeno" });
+  $("#wpp-copiar", corpo).addEventListener("click", async () => {
+    const ok = await copiarTexto(texto);
+    toast(ok ? "Mensagem copiada!" : "Não foi possível copiar.", ok ? "ok" : "erro");
   });
 }
+
+/* ---------------- editar pedido ---------------- */
 
 function abrirEditarVenda(idVenda, aoMudar) {
   const vendaAgrupada = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
   if (!vendaAgrupada) return;
 
   let editItens = vendaAgrupada.itens.map(i => ({
+    id: i.id,
     produto_id: i.produto_id,
     produto_nome: i.produto_nome,
     quantidade: numero(i.quantidade),
     preco_unit: numero(i.preco_unit),
     subtotal: numero(i.subtotal),
+    item_pronto: i.item_pronto || "",
   }));
 
   const dataLocal = new Date(vendaAgrupada.data).toISOString().slice(0, 16);
@@ -220,25 +312,21 @@ function abrirEditarVenda(idVenda, aoMudar) {
       <label class="rotulo">Data
         <input class="campo" name="data" type="datetime-local" value="${esc(dataLocal)}" required>
       </label>
+      <label class="rotulo">Data de entrega
+        <input class="campo" name="data_entrega" type="date" value="${esc(vendaAgrupada.data_entrega || "")}">
+      </label>
       <label class="rotulo">Cliente
         <input class="campo" name="cliente_nome" list="edit-lista-clientes" value="${esc(vendaAgrupada.cliente_nome || "")}" autocomplete="off">
         <datalist id="edit-lista-clientes">
           ${App.db.clientes.map(c => `<option value="${esc(c.nome)}">`).join("")}
         </datalist>
       </label>
-      <div class="meio">
-        <label class="rotulo">Pagamento
-          <select class="campo" name="pagamento">
-            ${CONFIG.formasPagamento.map(f => `<option ${f === vendaAgrupada.pagamento ? "selected" : ""}>${esc(f)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="rotulo">Status
-          <select class="campo" name="status">
-            ${CONFIG.statusVenda.map(s => `<option ${s === vendaAgrupada.status ? "selected" : ""}>${esc(s)}</option>`).join("")}
-          </select>
-        </label>
-      </div>
-      <label class="rotulo">Entrega / observações
+      <label class="rotulo">Forma de pagamento
+        <select class="campo" name="pagamento">
+          ${CONFIG.formasPagamento.map(f => `<option ${f === vendaAgrupada.pagamento ? "selected" : ""}>${esc(f)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="rotulo">Observações
         <input class="campo" name="entrega" value="${esc(vendaAgrupada.entrega || "")}">
       </label>
       <div class="posicao-relativa" style="margin-bottom:6px">
@@ -256,7 +344,7 @@ function abrirEditarVenda(idVenda, aoMudar) {
       </div>
     </form>`;
 
-  const modal = abrirModal(`Editar venda #${esc(idVenda)}`, corpo);
+  const modal = abrirModal(`Editar pedido #${esc(idVenda)}`, corpo);
 
   function atualizarFinanceiro() {
     const total = editItens.reduce((s, i) => s + i.subtotal, 0);
@@ -290,7 +378,6 @@ function abrirEditarVenda(idVenda, aoMudar) {
   }
   renderEditItens();
 
-  // Busca de produtos para adicionar
   const editBusca = $("#edit-pdv-busca", corpo);
   const editSugestoes = $("#edit-pdv-sugestoes", corpo);
   editBusca.addEventListener("input", () => {
@@ -310,7 +397,7 @@ function abrirEditarVenda(idVenda, aoMudar) {
     if (!btn) return;
     const p = App.db.produtos.find(p => p.id === btn.dataset.id);
     if (!p) return;
-    editItens.push({ produto_id: p.id, produto_nome: p.nome, quantidade: 1, preco_unit: numero(p.preco), subtotal: numero(p.preco) });
+    editItens.push({ produto_id: p.id, produto_nome: p.nome, quantidade: 1, preco_unit: numero(p.preco), subtotal: numero(p.preco), item_pronto: "" });
     editBusca.value = "";
     editSugestoes.classList.add("oculto");
     renderEditItens();
@@ -341,17 +428,20 @@ function abrirEditarVenda(idVenda, aoMudar) {
     const novaData = new Date(dados.get("data")).toISOString();
     const nomeCliente = String(dados.get("cliente_nome")).trim();
     const clienteCadastrado = App.db.clientes.find(c => semAcentos(c.nome) === semAcentos(nomeCliente));
+    const ativoAgora = contaComoVenda(vendaAgrupada.status_producao);
 
-    // Reverter baixa original
-    if (revertirBaixaVenda(vendaAgrupada)) salvarTabela("insumos");
+    // Reverter baixa original (só se o pedido contava como venda)
+    if (ativoAgora && revertirBaixaVenda(vendaAgrupada)) salvarTabela("insumos");
 
-    // Substituir linhas da venda
+    // Substituir linhas da venda preservando etapa/pagamento/tipo
     App.db.vendas = App.db.vendas.filter(v => (v.id_venda || v.id) !== idVenda);
     editItens.forEach((item, idx) => {
       App.db.vendas.push({
         id: `${idVenda}-${idx + 1}`,
         id_venda: idVenda,
+        tipo: vendaAgrupada.tipo,
         data: novaData,
+        data_entrega: String(dados.get("data_entrega") || ""),
         cliente_id: clienteCadastrado?.id || "",
         cliente_nome: nomeCliente,
         produto_id: item.produto_id,
@@ -359,8 +449,13 @@ function abrirEditarVenda(idVenda, aoMudar) {
         quantidade: numero(item.quantidade),
         preco_unit: numero(item.preco_unit),
         subtotal: numero(item.subtotal),
+        item_pronto: item.item_pronto || "",
         pagamento: String(dados.get("pagamento")),
-        status: String(dados.get("status")),
+        status_pagamento: vendaAgrupada.status_pagamento,
+        valor_pago: vendaAgrupada.valor_pago || "",
+        status_producao: vendaAgrupada.status_producao,
+        status: vendaAgrupada.itens[0]?.status || "Pendente",
+        arquivado: vendaAgrupada.arquivado ? "sim" : "",
         entrega: String(dados.get("entrega")).trim(),
         observacoes: "",
         criado_por: vendaAgrupada.criado_por || App.usuario.usuario,
@@ -368,39 +463,32 @@ function abrirEditarVenda(idVenda, aoMudar) {
       });
     });
 
-    // Aplicar nova baixa
-    let insumosMudaram = false;
-    editItens.forEach(item => {
-      const produto = App.db.produtos.find(p => p.id === item.produto_id);
-      (produto?.composicao || []).forEach(comp => {
-        const insumo = App.db.insumos.find(i => i.id === comp.id_insumo);
-        if (insumo) {
-          insumo.quantidade = numero(insumo.quantidade) - numero(comp.quantidade) * numero(item.quantidade);
-          insumo.atualizado_em = new Date().toISOString();
-          insumosMudaram = true;
-        }
-      });
-    });
-    if (insumosMudaram) salvarTabela("insumos");
+    // Aplicar nova baixa (só se contava como venda)
+    if (ativoAgora) {
+      const vNova = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
+      if (aplicarBaixaVenda(vNova)) salvarTabela("insumos");
+    }
     salvarTabela("vendas");
-    toast("Venda atualizada.");
+    toast("Pedido atualizado.");
     modal.fechar();
     if (aoMudar) aoMudar();
   });
 }
 
-/* ---------------- PDV (nova venda) ---------------- */
+/* ---------------- PDV (novo pedido / orçamento) ---------------- */
 
-function renderPdv(el) {
-  App.editando = true; // bloqueia atualização automática da tela durante a venda
+function renderPdv(el, opcoes = {}) {
+  App.editando = true; // bloqueia atualização automática da tela durante o pedido
+  const tipo = opcoes.tipo === "Orçamento" ? "Orçamento" : "Pedido";
+  const ehOrcamento = tipo === "Orçamento";
 
   const recuperada = pdvItens.length > 0;
 
   el.innerHTML = `
     <div class="pagina pdv">
       <div class="pdv-topo">
-        <button type="button" class="btn btn-secundario" id="pdv-voltar">‹ Vendas</button>
-        <span class="pdv-dica">Enter avança o fluxo</span>
+        <button type="button" class="btn btn-secundario" id="pdv-voltar">‹ Pedidos</button>
+        <span class="pdv-dica">${ehOrcamento ? "Novo orçamento" : "Novo pedido"}</span>
       </div>
 
       <div class="bloco">
@@ -425,17 +513,29 @@ function renderPdv(el) {
 
       <div class="bloco">
         <label class="rotulo" for="pdv-cliente">Cliente</label>
-        <input id="pdv-cliente" class="campo" list="lista-clientes" placeholder="Nome do cliente (opcional)" autocomplete="off">
+        <input id="pdv-cliente" class="campo" list="lista-clientes" placeholder="Nome do cliente" autocomplete="off">
         <datalist id="lista-clientes">
           ${App.db.clientes.map((c) => `<option value="${esc(c.nome)}">`).join("")}
         </datalist>
-        <label class="rotulo" for="pdv-pagamento">Pagamento</label>
+        <div class="meio">
+          <label class="rotulo" for="pdv-entrega-data">Data de entrega
+            <input id="pdv-entrega-data" class="campo" type="date">
+          </label>
+          <label class="rotulo" for="pdv-pagamento-status">Pagamento
+            <select id="pdv-pagamento-status" class="campo">
+              ${CONFIG.statusPagamento.map((s) => `<option>${esc(s)}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <label class="rotulo" for="pdv-pagamento">Forma de pagamento</label>
         <select id="pdv-pagamento" class="campo">
           ${CONFIG.formasPagamento.map((f) => `<option>${esc(f)}</option>`).join("")}
         </select>
-        <label class="rotulo" for="pdv-obs">Entrega / observações</label>
+        <label class="rotulo" for="pdv-obs">Observações</label>
         <input id="pdv-obs" class="campo" placeholder="Opcional" autocomplete="off">
-        <button type="button" class="btn btn-primario btn-grande btn-cheio" id="pdv-finalizar" style="margin-top:6px">Finalizar venda</button>
+        <button type="button" class="btn btn-primario btn-grande btn-cheio" id="pdv-finalizar" style="margin-top:6px">
+          ${ehOrcamento ? "Salvar orçamento" : "Salvar pedido"}
+        </button>
       </div>
     </div>`;
 
@@ -542,7 +642,7 @@ function renderPdv(el) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (busca.value.trim() === "" && pdvItens.length) {
-        cliente.focus(); // campo vazio + Enter = ir para o fechamento
+        cliente.focus();
       } else if (sugestoes.length) {
         escolherProduto(sugestoes[selecionada]);
       }
@@ -580,23 +680,17 @@ function renderPdv(el) {
   cliente.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); pagamento.focus(); }
   });
-  pagamento.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); finalizar(); }
-  });
-  $("#pdv-obs", el).addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); finalizar(); }
-  });
 
   $("#pdv-finalizar", el).addEventListener("click", finalizar);
 
   $("#pdv-voltar", el).addEventListener("click", async () => {
     if (pdvItens.length) {
-      const ok = await confirmar("Descartar a venda em andamento?", { perigo: true, botao: "Descartar" });
+      const ok = await confirmar("Descartar o que está em andamento?", { perigo: true, botao: "Descartar" });
       if (!ok) return;
       pdvItens = [];
     }
     App.editando = false;
-    renderListaVendas(el);
+    renderListaPedidos(el);
   });
 
   function finalizar() {
@@ -607,6 +701,8 @@ function renderPdv(el) {
     }
     const nomeCliente = cliente.value.trim();
     const formaPagamento = pagamento.value;
+    const statusPagamento = $("#pdv-pagamento-status", el).value;
+    const dataEntrega = $("#pdv-entrega-data", el).value;
     const obs = $("#pdv-obs", el).value.trim();
     const total = pdvItens.reduce((s, i) => s + i.subtotal, 0);
 
@@ -616,16 +712,17 @@ function renderPdv(el) {
         ${pdvItens.map((i) => `
           <div class="linha"><span>${esc(i.quantidade)}x ${esc(i.produto_nome)}</span><span>${dinheiro(i.subtotal)}</span></div>`).join("")}
         <div class="linha total"><span>Total</span><span>${dinheiro(total)}</span></div>
+        <div class="linha"><span class="suave">Tipo</span><span>${ehOrcamento ? "Orçamento" : "Pedido"}</span></div>
         <div class="linha"><span class="suave">Cliente</span><span>${esc(nomeCliente || "Não informado")}</span></div>
-        <div class="linha"><span class="suave">Pagamento</span><span>${esc(formaPagamento)}</span></div>
-        ${obs ? `<div class="linha"><span class="suave">Entrega/obs.</span><span>${esc(obs)}</span></div>` : ""}
+        ${dataEntrega ? `<div class="linha"><span class="suave">Entrega</span><span>${dataCurta(dataEntrega)}</span></div>` : ""}
+        <div class="linha"><span class="suave">Pagamento</span><span>${esc(statusPagamento)}</span></div>
       </div>
       <div class="linha-botoes">
         <button type="button" class="btn btn-secundario" data-acao="voltar">Voltar</button>
-        <button type="button" class="btn btn-primario" data-acao="confirmar">Confirmar venda</button>
+        <button type="button" class="btn btn-primario" data-acao="confirmar">${ehOrcamento ? "Salvar orçamento" : "Salvar pedido"}</button>
       </div>`;
 
-    const modal = abrirModal("Confirmar venda", corpo, { classe: "modal-pequeno" });
+    const modal = abrirModal(ehOrcamento ? "Confirmar orçamento" : "Confirmar pedido", corpo, { classe: "modal-pequeno" });
     corpo.querySelector('[data-acao="confirmar"]').focus();
 
     corpo.addEventListener("click", (e) => {
@@ -634,12 +731,16 @@ function renderPdv(el) {
       if (acao === "confirmar") {
         const idVenda = gerarIdVenda();
         const agora = new Date().toISOString();
+        const statusProducao = ehOrcamento ? "Orçamento" : "Pedido feito";
+        const statusCompat = "Pendente";
         const clienteCadastrado = App.db.clientes.find((c) => semAcentos(c.nome) === semAcentos(nomeCliente));
         pdvItens.forEach((item, idx) => {
           App.db.vendas.push({
             id: `${idVenda}-${idx + 1}`,
             id_venda: idVenda,
+            tipo: tipo,
             data: agora,
+            data_entrega: dataEntrega || "",
             cliente_id: clienteCadastrado?.id || "",
             cliente_nome: nomeCliente,
             produto_id: item.produto_id,
@@ -647,8 +748,13 @@ function renderPdv(el) {
             quantidade: numero(item.quantidade),
             preco_unit: numero(item.preco_unit),
             subtotal: numero(item.subtotal),
+            item_pronto: "",
             pagamento: formaPagamento,
-            status: "Concluída",
+            status_pagamento: statusPagamento,
+            valor_pago: statusPagamento === "Pago" ? total : "",
+            status_producao: statusProducao,
+            status: statusCompat,
+            arquivado: "",
             entrega: obs,
             observacoes: "",
             criado_por: App.usuario.usuario,
@@ -656,29 +762,26 @@ function renderPdv(el) {
           });
         });
         salvarTabela("vendas");
-        let insumosMudaram = false;
-        pdvItens.forEach((item) => {
-          const produto = App.db.produtos.find((p) => p.id === item.produto_id);
-          (produto?.composicao || []).forEach((comp) => {
-            const insumo = App.db.insumos.find((i) => i.id === comp.id_insumo);
-            if (insumo) {
-              insumo.quantidade = numero(insumo.quantidade) - numero(comp.quantidade) * numero(item.quantidade);
-              insumo.atualizado_em = new Date().toISOString();
-              insumosMudaram = true;
-            }
-          });
-        });
-        if (insumosMudaram) salvarTabela("insumos");
+
+        // Baixa de estoque só quando o pedido já vale como venda (não orçamento).
+        if (contaComoVenda(statusProducao)) {
+          const vNova = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
+          if (aplicarBaixaVenda(vNova)) salvarTabela("insumos");
+        }
+
         pdvItens = [];
         modal.fechar();
-        toast("Venda registrada!");
-        renderPdv(el); // pronto para a próxima venda
+        toast(ehOrcamento ? "Orçamento salvo!" : "Pedido salvo!");
+        App.editando = false;
+        // Oferece envio pelo WhatsApp logo após salvar.
+        abrirEnvioWhatsapp(idVenda);
+        renderListaPedidos(el);
       }
     });
   }
 
   /* --- estado inicial --- */
   atualizarItens();
-  if (recuperada) toast("Venda em andamento recuperada.");
+  if (recuperada) toast("Itens em andamento recuperados.");
   busca.focus();
 }
