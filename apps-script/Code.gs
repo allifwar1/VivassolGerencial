@@ -35,7 +35,7 @@ const ABAS = {
            "quantidade", "preco_unit", "subtotal", "pagamento", "status", "entrega",
            "observacoes", "criado_por", "criado_em",
            "tipo", "data_entrega", "item_pronto", "status_pagamento", "valor_pago",
-           "status_producao", "arquivado", "data_vencimento"],
+           "status_producao", "arquivado", "data_vencimento", "ordem_fluxo"],
   // Histórico de recebimentos de cada venda (uma linha por pagamento).
   pagamentos: ["id", "id_venda", "cliente_nome", "data", "valor", "forma_pagamento",
                "criado_por", "criado_em"],

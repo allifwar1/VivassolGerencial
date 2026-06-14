@@ -13,9 +13,18 @@
 let fluxoEsc = 1;            // escala (zoom) do quadro
 let fluxoZoomManual = false; // true quando o usuário ajustou o zoom pelos botões +/-
 let fluxoCompacto = false;   // true = cartões sem checklist e data de entrega
+let fluxoOrdenacao = "entrega"; // entrega | chegada | alfabetica | personalizado
 let _mirrorBar = null;       // barra de scroll espelho fixada no rodapé (desktop)
 let _mirrorObs = null;       // ResizeObserver da barra espelho
 let _telaPaisagem = false;   // true quando orientação travada em paisagem
+
+/* Rótulos do seletor de ordenação. */
+const FLUXO_ORDENS = [
+  { id: "entrega", rotulo: "Quem sai primeiro" },
+  { id: "chegada", rotulo: "Ordem de chegada" },
+  { id: "alfabetica", rotulo: "Ordem A → Z" },
+  { id: "personalizado", rotulo: "Personalizado" },
+];
 
 registrarModulo({
   id: "fluxo",
@@ -32,13 +41,7 @@ function renderFluxo(el) {
 
   const rolagem = capturarRolagem(el);
 
-  const pedidos = agruparVendas(App.db.vendas).filter((v) => !v.arquivado);
-  const porStatus = {};
-  CONFIG.statusProducao.forEach((s) => (porStatus[s] = []));
-  pedidos.forEach((v) => {
-    (porStatus[v.status_producao] || (porStatus[v.status_producao] = [])).push(v);
-  });
-  Object.values(porStatus).forEach((lista) => lista.sort(ordenarPorEntrega));
+  const porStatus = montarColunasFluxo();
 
   el.innerHTML = `
     <div class="pagina-fluxo">
@@ -49,6 +52,11 @@ function renderFluxo(el) {
           <button type="button" class="btn-zoom btn-zoom-auto" id="zoom-auto" title="Ajustar ao tamanho da tela" aria-label="Auto-ajustar">⊡</button>
         </div>
         <div class="fluxo-acoes">
+          <label class="fluxo-ordenar-rotulo">Ordenar:
+            <select id="fluxo-ordenar" class="campo campo-mini">
+              ${FLUXO_ORDENS.map((o) => `<option value="${o.id}" ${o.id === fluxoOrdenacao ? "selected" : ""}>${o.rotulo}</option>`).join("")}
+            </select>
+          </label>
           <button type="button" class="btn btn-secundario btn-mini ${fluxoCompacto ? "ativo" : ""}" id="btn-compacto">⊟ Compacto</button>
           <button type="button" class="btn btn-secundario btn-mini fluxo-btn-girar" id="btn-girar">🔄 Girar tela</button>
           <button type="button" class="btn btn-secundario btn-mini" id="limpar-entregues">Limpar entregues</button>
@@ -104,6 +112,12 @@ function renderFluxo(el) {
     aplicarZoom();
   }, { passive: false });
 
+  /* ---- ordenação das colunas ---- */
+  $("#fluxo-ordenar", el).addEventListener("change", (e) => {
+    fluxoOrdenacao = e.target.value;
+    refresh();
+  });
+
   /* ---- modo compacto ---- */
   $("#btn-compacto", el).addEventListener("click", () => {
     fluxoCompacto = !fluxoCompacto;
@@ -117,16 +131,38 @@ function renderFluxo(el) {
   $("#limpar-entregues", el).addEventListener("click", () => limparColuna("Entregue", refresh));
   $("#limpar-cancelados", el).addEventListener("click", () => limparColuna("Cancelado", refresh));
 
-  /* ---- arrastar (alça) ---- */
+  /* ---- arrastar (alça): muda de coluna e/ou reordena dentro da coluna ---- */
   board.addEventListener("pointerdown", (e) => {
     const handle = e.target.closest(".card-handle");
     if (!handle) return;
     const card = handle.closest(".card-fluxo");
     if (!card) return;
-    iniciarArrasto(e, card, board, async (novoStatus) => {
-      if (novoStatus && novoStatus !== card.dataset.statusAtual) {
-        await mudarStatusProducao(card.dataset.venda, novoStatus, { aoMudar: refresh });
+    iniciarArrasto(e, card, board, async (novoStatus, novaOrdemIds) => {
+      const idVenda = card.dataset.venda;
+      const mudouStatus = novoStatus && novoStatus !== card.dataset.statusAtual;
+      const reordenou = Array.isArray(novaOrdemIds) && novaOrdemIds.length > 0;
+      if (!mudouStatus && !reordenou) return;
+
+      // Se ficou na mesma coluna e na mesma posição, não faz nada (não vira
+      // "Personalizado" à toa).
+      if (!mudouStatus) {
+        const atual = (montarColunasFluxo()[novoStatus] || []).map((v) => v.id_venda);
+        if (JSON.stringify(atual) === JSON.stringify(novaOrdemIds)) return;
       }
+
+      // Muda o status primeiro (pode pedir confirmação). Se o usuário cancelar,
+      // aborta também a reordenação.
+      if (mudouStatus) {
+        const ok = await mudarStatusProducao(idVenda, novoStatus, { silencioso: true });
+        if (!ok) { refresh(); return; }
+      }
+      // Congela a ordem visível atual de todas as colunas, para que ao entrar
+      // em "Personalizado" nenhuma outra coluna pule de lugar.
+      congelarOrdemFluxo();
+      if (reordenou) aplicarOrdemColuna(novaOrdemIds);
+      fluxoOrdenacao = "personalizado";
+      salvarTabela("vendas");
+      refresh();
     });
   });
 
@@ -261,6 +297,63 @@ function ordenarPorEntrega(a, b) {
   return String(b.data).localeCompare(String(a.data));
 }
 
+/* Monta o mapa coluna → pedidos, já ordenado conforme a opção escolhida. */
+function montarColunasFluxo() {
+  const pedidos = agruparVendas(App.db.vendas).filter((v) => !v.arquivado);
+  const porStatus = {};
+  CONFIG.statusProducao.forEach((s) => (porStatus[s] = []));
+  pedidos.forEach((v) => {
+    (porStatus[v.status_producao] || (porStatus[v.status_producao] = [])).push(v);
+  });
+  Object.keys(porStatus).forEach((s) => { porStatus[s] = ordenarColunaFluxo(porStatus[s]); });
+  return porStatus;
+}
+
+/* Ordena uma coluna conforme `fluxoOrdenacao`. */
+function ordenarColunaFluxo(lista) {
+  const arr = lista.slice();
+  if (fluxoOrdenacao === "chegada") {
+    // Mais antigo primeiro (quem chegou antes fica no topo).
+    arr.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  } else if (fluxoOrdenacao === "alfabetica") {
+    arr.sort((a, b) => String(a.cliente_nome || "").localeCompare(String(b.cliente_nome || ""), "pt-BR"));
+  } else if (fluxoOrdenacao === "personalizado") {
+    arr.sort((a, b) => {
+      const oa = numero(a.ordem_fluxo) || 0;
+      const ob = numero(b.ordem_fluxo) || 0;
+      if (oa && ob) return oa - ob;
+      if (oa) return -1;
+      if (ob) return 1;
+      return String(b.data).localeCompare(String(a.data));
+    });
+  } else {
+    // Padrão: quem deve sair primeiro (entrega mais próxima).
+    arr.sort(ordenarPorEntrega);
+  }
+  return arr;
+}
+
+/* Grava o número de ordem em todas as linhas de uma venda. */
+function definirOrdemFluxo(idVenda, n) {
+  App.db.vendas.forEach((linha) => {
+    if ((linha.id_venda || linha.id) === idVenda) linha.ordem_fluxo = n;
+  });
+}
+
+/* "Congela" a ordem visível atual (na ordenação vigente) em ordem_fluxo,
+   para que ao passar para o modo personalizado nada pule de posição. */
+function congelarOrdemFluxo() {
+  const porStatus = montarColunasFluxo();
+  Object.values(porStatus).forEach((lista) => {
+    lista.forEach((venda, i) => definirOrdemFluxo(venda.id_venda, i + 1));
+  });
+}
+
+/* Aplica a nova ordem (lista de id_venda) de uma coluna. */
+function aplicarOrdemColuna(ids) {
+  ids.forEach((idVenda, i) => definirOrdemFluxo(idVenda, i + 1));
+}
+
 function acharPedido(idVenda) {
   return agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
 }
@@ -373,11 +466,23 @@ function iniciarArrasto(e, card, board, aoSoltar) {
     document.removeEventListener("pointermove", mover);
     document.removeEventListener("pointerup", soltar);
     document.removeEventListener("pointercancel", soltar);
+
+    // Captura a nova ordem da coluna alvo (posição da aura entre os cards),
+    // antes de remover a aura do DOM.
+    let novaOrdemIds = null;
+    if (colunaAlvo && aura.parentElement) {
+      novaOrdemIds = [];
+      [...aura.parentElement.children].forEach((n) => {
+        if (n === aura) novaOrdemIds.push(card.dataset.venda);
+        else if (n.classList.contains("card-fluxo") && n !== card) novaOrdemIds.push(n.dataset.venda);
+      });
+    }
+
     ghost.remove();
     aura.remove();
     card.classList.remove("card-arrastando");
     $$(".coluna-fluxo", board).forEach((c) => c.classList.remove("coluna-hover"));
-    if (colunaAlvo) aoSoltar(colunaAlvo.dataset.status);
+    if (colunaAlvo) aoSoltar(colunaAlvo.dataset.status, novaOrdemIds);
   }
 
   document.addEventListener("pointermove", mover);

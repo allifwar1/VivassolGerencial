@@ -981,7 +981,26 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 }
 .btn-zoom-auto { font-size: 16px; }
 
-.fluxo-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.fluxo-acoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Seletor de ordenação das colunas */
+.fluxo-ordenar-rotulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--texto-suave);
+  font-weight: 600;
+}
+.campo-mini {
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  background: var(--cartao);
+  color: var(--texto);
+  cursor: pointer;
+}
 
 /* "Compacto" ativo fica destacado */
 .btn-secundario.ativo { background: var(--verde); color: #fff; border-color: var(--verde); }

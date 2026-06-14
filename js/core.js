@@ -380,7 +380,7 @@ async function sincronizar(opcoes = {}) {
     // Preservar os campos novos de pedido/fluxo. Se a planilha ainda não tem
     // essas colunas (cabeçalho antigo), os valores voltam vazios e a etapa
     // do pedido se perderia — então guardamos por id de item e restauramos.
-    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "data_vencimento", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado"];
+    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "data_vencimento", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado", "ordem_fluxo"];
     const pedidoLocal = new Map(
       (App.db.vendas || []).map(linha => [linha.id, linha])
     );
@@ -571,6 +571,7 @@ function agruparVendas(linhas) {
     }
     venda.saldo = Math.max(0, venda.total - venda.valor_pago);
     venda.arquivado = String(base.arquivado || "").toLowerCase() === "sim";
+    venda.ordem_fluxo = base.ordem_fluxo || "";
   });
   return [...mapa.values()].sort((a, b) => String(b.data).localeCompare(String(a.data)));
 }
