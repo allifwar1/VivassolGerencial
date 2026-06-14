@@ -1034,8 +1034,6 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   .fluxo-ordenar-rotulo { width: 100%; }
   .fluxo-ordenar-rotulo .campo-mini { flex: 1; }
   .fluxo-acoes { width: 100%; }
-  /* espaço no final do board para a barra de navegação inferior não cobrir o último card */
-  .board { padding-bottom: calc(var(--altura-nav) + env(safe-area-inset-bottom) + 16px); }
 }
 
 .board {
@@ -1046,6 +1044,11 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   -webkit-overflow-scrolling: touch;
   font-size: calc(14px * var(--esc, 1));
   align-items: flex-start;
+}
+
+/* espaço no final do board para a nav inferior não cobrir o último card (celular/touch) */
+@media (pointer: coarse) {
+  .board { padding-bottom: calc(var(--altura-nav) + env(safe-area-inset-bottom) + 16px); }
 }
 
 .coluna-fluxo {
