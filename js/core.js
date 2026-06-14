@@ -30,7 +30,7 @@ const App = {
 const CHAVE_DB = "vivassol.v2.db";
 const CHAVE_SESSAO = "vivassol.v2.sessao";
 const CHAVE_PENDENTES = "vivassol.v2.pendentes";
-const TABELAS = ["configuracoes", "usuarios", "clientes", "produtos", "insumos", "vendas"];
+const TABELAS = ["configuracoes", "usuarios", "clientes", "produtos", "insumos", "vendas", "pagamentos", "lancamentos"];
 
 /* ---------------- utilitários ---------------- */
 
@@ -174,6 +174,8 @@ const ICONES = {
   estoque: icone('<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5"/><path d="M12 12v9"/>'),
   clientes: icone('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.4 3.4-5 6.5-5s5.8 1.6 6.5 5"/><path d="M16 5.3a3.5 3.5 0 0 1 0 5.4"/><path d="M18.5 15.4c1.7.8 2.8 2.3 3 4.6"/>'),
   produtos: icone('<path d="M3 11V4h7l10 10-7 7L3 11z"/><circle cx="7.5" cy="8.5" r="1.4"/>'),
+  caixa: icone('<rect x="3" y="6.5" width="18" height="13" rx="2"/><path d="M3 10.5h18"/><circle cx="12" cy="15" r="1.6"/>'),
+  cobrancas: icone('<path d="M4 5h16v12H4z"/><path d="M4 9h16"/><path d="M8 13h4"/><path d="M19 17v3l2-1.2"/>'),
   config: icone('<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/>'),
   mais: icone('<circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>'),
   sair: icone('<path d="M9 4H4v16h5"/><path d="M16 8l4 4-4 4"/><path d="M9 12h11"/>'),
@@ -249,26 +251,35 @@ function salvarTabela(nomeTabela) {
   enviarPendentes();
 }
 
+/* Serializa as linhas de uma tabela para envio (produtos têm a composição
+   convertida para texto; as demais vão como estão). */
+function linhasParaEnvioDe(tabela) {
+  if (tabela === "produtos") {
+    return App.db.produtos.map(p => ({
+      ...p,
+      composicao: (p.composicao || []).map(c => `${c.id_insumo}[${c.nome_insumo}](${c.quantidade})`).join(", "),
+    }));
+  }
+  return App.db[tabela];
+}
+
 async function enviarPendentes() {
   if (!apiConfigurada() || App.syncOcupado || App.tabelasPendentes.size === 0) return;
   App.syncOcupado = true;
   atualizarStatus("sincronizando");
+  let algumaFalha = false;
   try {
     for (const tabela of [...App.tabelasPendentes]) {
-      const linhasParaEnvio = tabela === "produtos"
-        ? App.db.produtos.map(p => ({
-            ...p,
-            composicao: (p.composicao || []).map(c => `${c.id_insumo}[${c.nome_insumo}](${c.quantidade})`).join(", ")
-          }))
-        : App.db[tabela];
-      await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvio });
-      App.tabelasPendentes.delete(tabela);
-      salvarPendentesLocal();
+      try {
+        await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
+        App.tabelasPendentes.delete(tabela);
+        salvarPendentesLocal();
+      } catch (e) {
+        algumaFalha = true;
+        console.warn("Falha ao enviar a tabela (segue pendente):", tabela, e);
+      }
     }
-    atualizarStatus("online");
-  } catch (erro) {
-    console.warn("Falha ao enviar dados (ficam pendentes no aparelho):", erro);
-    atualizarStatus("offline");
+    atualizarStatus(algumaFalha ? "offline" : "online");
   } finally {
     App.syncOcupado = false;
   }
@@ -343,17 +354,17 @@ async function sincronizar(opcoes = {}) {
   App.syncOcupado = true;
   atualizarStatus("sincronizando");
   try {
-    // 1) Envia primeiro o que está pendente neste aparelho.
+    // 1) Envia primeiro o que está pendente neste aparelho. Uma tabela que
+    //    falhar (ex.: aba ainda não existe na planilha) fica pendente, mas
+    //    não impede o envio das outras nem a leitura abaixo.
     for (const tabela of [...App.tabelasPendentes]) {
-      const linhasParaEnvio = tabela === "produtos"
-        ? App.db.produtos.map(p => ({
-            ...p,
-            composicao: (p.composicao || []).map(c => `${c.id_insumo}[${c.nome_insumo}](${c.quantidade})`).join(", ")
-          }))
-        : App.db[tabela];
-      await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvio });
-      App.tabelasPendentes.delete(tabela);
-      salvarPendentesLocal();
+      try {
+        await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
+        App.tabelasPendentes.delete(tabela);
+        salvarPendentesLocal();
+      } catch (e) {
+        console.warn("Falha ao enviar a tabela (segue pendente):", tabela, e);
+      }
     }
     // 2) Baixa tudo da planilha.
     const dados = await chamarApi("obterTudo");
@@ -369,7 +380,7 @@ async function sincronizar(opcoes = {}) {
     // Preservar os campos novos de pedido/fluxo. Se a planilha ainda não tem
     // essas colunas (cabeçalho antigo), os valores voltam vazios e a etapa
     // do pedido se perderia — então guardamos por id de item e restauramos.
-    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado"];
+    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "data_vencimento", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado"];
     const pedidoLocal = new Map(
       (App.db.vendas || []).map(linha => [linha.id, linha])
     );
@@ -543,10 +554,22 @@ function agruparVendas(linhas) {
     const base = venda.itens[0] || {};
     venda.tipo = tipoDe(base);
     venda.data_entrega = base.data_entrega || "";
+    venda.data_vencimento = base.data_vencimento || "";
     venda.cliente_id = base.cliente_id || "";
     venda.status_producao = statusProducaoDe(base);
-    venda.status_pagamento = statusPagamentoDe(base);
-    venda.valor_pago = base.valor_pago || "";
+
+    // Fonte da verdade do pagamento: a tabela "pagamentos". Se houver
+    // recebimentos registrados, o valor pago e a situação vêm deles; senão,
+    // usa o que está guardado na própria linha (registros antigos).
+    const recebido = totalPagoVenda(venda.id_venda);
+    if (temPagamentos(venda.id_venda)) {
+      venda.valor_pago = recebido;
+      venda.status_pagamento = derivarStatusPagamento(venda.total, recebido);
+    } else {
+      venda.status_pagamento = statusPagamentoDe(base);
+      venda.valor_pago = numero(base.valor_pago);
+    }
+    venda.saldo = Math.max(0, venda.total - venda.valor_pago);
     venda.arquivado = String(base.arquivado || "").toLowerCase() === "sim";
   });
   return [...mapa.values()].sort((a, b) => String(b.data).localeCompare(String(a.data)));
@@ -568,8 +591,9 @@ function statusProducaoDe(linha) {
 function statusPagamentoDe(linha) {
   const s = String(linha?.status_pagamento || "").trim();
   if (CONFIG.statusPagamento.includes(s)) return s;
-  // Registro antigo: "Fiado" sem status = não pago; concluído = pago.
-  if (String(linha?.pagamento || "") === "Fiado") return "Não pago";
+  // Registro antigo: fiado/prazo sem status = não pago; concluído = pago.
+  const forma = String(linha?.pagamento || "");
+  if (forma === "Fiado" || forma === "Venda a prazo") return "Não pago";
   return String(linha?.status || "") === "Concluída" ? "Pago" : "Não pago";
 }
 
@@ -685,13 +709,16 @@ async function mudarStatusProducao(idVenda, novoStatus, opcoes = {}) {
       { titulo: "Pedido não pago", botao: "Entregar mesmo assim" });
     if (!ok) return false;
   }
+  let devolver = false;
   if (novoStatus === "Cancelado" && (venda.status_pagamento === "Pago" || venda.status_pagamento === "Parcial")) {
     const ok = await confirmar(
-      `Este pedido tem pagamento registrado (${venda.status_pagamento}). Lembre-se de devolver o valor ao cliente. Deseja cancelar?`,
-      { perigo: true, titulo: "Devolver ao cliente", botao: "Cancelar pedido" });
+      `Este pedido já recebeu ${dinheiro(venda.valor_pago)}. Ao cancelar, esse valor será lançado como DEVOLUÇÃO (saída) no caixa. Deseja cancelar?`,
+      { perigo: true, titulo: "Devolver ao cliente", botao: "Cancelar e devolver" });
     if (!ok) return false;
+    devolver = true;
   }
 
+  if (devolver) registrarDevolucaoVenda(idVenda);
   if (ajustarEstoquePorTransicao(venda, atual, novoStatus)) salvarTabela("insumos");
 
   const statusCompat = novoStatus === "Cancelado" ? "Cancelada"
@@ -707,23 +734,6 @@ async function mudarStatusProducao(idVenda, novoStatus, opcoes = {}) {
   if (!opcoes.silencioso) toast(`Pedido movido para "${novoStatus}".`);
   if (opcoes.aoMudar) opcoes.aoMudar();
   return true;
-}
-
-function mudarStatusPagamento(idVenda, novoStatus, opcoes = {}) {
-  App.db.vendas.forEach((linha) => {
-    if ((linha.id_venda || linha.id) === idVenda) linha.status_pagamento = novoStatus;
-  });
-  salvarTabela("vendas");
-  if (!opcoes.silencioso) toast(`Pagamento: ${novoStatus}.`);
-  if (opcoes.aoMudar) opcoes.aoMudar();
-}
-
-/* Avança o pagamento para o próximo estado (Não pago → Parcial → Pago). */
-function ciclarPagamento(idVenda, atual, opcoes = {}) {
-  const ordem = CONFIG.statusPagamento;
-  const proximo = ordem[(ordem.indexOf(atual) + 1) % ordem.length];
-  mudarStatusPagamento(idVenda, proximo, opcoes);
-  return proximo;
 }
 
 /* Marca/desmarca um item do pedido como pronto (checklist do card). */
@@ -751,6 +761,212 @@ function arquivarPedido(idVenda, opcoes = {}) {
   if (opcoes.aoMudar) opcoes.aoMudar();
 }
 
+/* ============================================================
+   PAGAMENTOS E CAIXA
+   - "pagamentos": cada recebimento de uma venda (histórico).
+   - "lancamentos": livro caixa — toda entrada/saída de dinheiro,
+     separada por destino ("dinheiro" vivo ou "banco").
+   O valor pago de uma venda é SEMPRE a soma dos seus pagamentos,
+   então nada fica inconsistente.
+   ============================================================ */
+
+/* Pix e cartões caem no banco; só "Dinheiro" é dinheiro vivo. */
+function destinoDaForma(forma) {
+  return semAcentos(forma).includes("dinheiro") ? "dinheiro" : "banco";
+}
+
+function derivarStatusPagamento(total, pago) {
+  if (pago <= 0.005) return "Não pago";
+  if (pago + 0.005 < numero(total)) return "Parcial";
+  return "Pago";
+}
+
+function pagamentosDaVenda(idVenda) {
+  return (App.db.pagamentos || []).filter((p) => p.id_venda === idVenda);
+}
+
+function temPagamentos(idVenda) {
+  return (App.db.pagamentos || []).some((p) => p.id_venda === idVenda);
+}
+
+function totalPagoVenda(idVenda) {
+  return pagamentosDaVenda(idVenda).reduce((s, p) => s + numero(p.valor), 0);
+}
+
+/* Registra um movimento no livro caixa. tipo: "entrada" | "saida" |
+   "ajuste". valor é sempre positivo, exceto em "ajuste" (pode ser
+   negativo para corrigir para baixo). Devolve o lançamento criado. */
+function registrarLancamento(dados, opcoes = {}) {
+  const agora = new Date().toISOString();
+  const lanc = {
+    id: gerarId("LAN", "lancamentos"),
+    data: dados.data || agora,
+    tipo: dados.tipo,
+    categoria: dados.categoria || "",
+    descricao: dados.descricao || "",
+    valor: numero(dados.valor),
+    destino: dados.destino === "banco" ? "banco" : "dinheiro",
+    id_referencia: dados.id_referencia || "",
+    criado_por: App.usuario?.usuario || "",
+    criado_em: agora,
+  };
+  App.db.lancamentos.push(lanc);
+  if (!opcoes.semSalvar) salvarTabela("lancamentos");
+  return lanc;
+}
+
+/* Registra o recebimento de uma venda: cria o pagamento (histórico) e a
+   entrada no caixa, e atualiza a situação de pagamento da venda. */
+function registrarPagamento(idVenda, dados, opcoes = {}) {
+  const venda = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
+  if (!venda) return null;
+  const valor = numero(dados.valor);
+  if (valor <= 0) return null;
+  const forma = dados.forma || "Dinheiro";
+  const agora = new Date().toISOString();
+
+  const pagamento = {
+    id: gerarId("PAG", "pagamentos"),
+    id_venda: idVenda,
+    cliente_nome: venda.cliente_nome || "",
+    data: dados.data || agora,
+    valor: valor,
+    forma_pagamento: forma,
+    criado_por: App.usuario?.usuario || "",
+    criado_em: agora,
+  };
+  App.db.pagamentos.push(pagamento);
+
+  registrarLancamento({
+    data: pagamento.data,
+    tipo: "entrada",
+    categoria: "Venda",
+    descricao: `Recebimento do pedido #${idVenda}${venda.cliente_nome ? " — " + venda.cliente_nome : ""}`,
+    valor: valor,
+    destino: destinoDaForma(forma),
+    id_referencia: pagamento.id,
+  }, { semSalvar: true });
+
+  sincronizarPagamentoNaVenda(idVenda, { novoVencimento: dados.novoVencimento });
+
+  salvarTabela("pagamentos");
+  salvarTabela("lancamentos");
+  salvarTabela("vendas");
+  if (opcoes.aoMudar) opcoes.aoMudar();
+  return pagamento;
+}
+
+/* Estorna (desfaz) um pagamento: remove o pagamento, tira a entrada do
+   caixa correspondente e reacerta a situação da venda. */
+function estornarPagamento(idPagamento, opcoes = {}) {
+  const pag = (App.db.pagamentos || []).find((p) => p.id === idPagamento);
+  if (!pag) return false;
+  const idVenda = pag.id_venda;
+  App.db.pagamentos = App.db.pagamentos.filter((p) => p.id !== idPagamento);
+  App.db.lancamentos = App.db.lancamentos.filter((l) => l.id_referencia !== idPagamento);
+  sincronizarPagamentoNaVenda(idVenda);
+  salvarTabela("pagamentos");
+  salvarTabela("lancamentos");
+  salvarTabela("vendas");
+  if (opcoes.aoMudar) opcoes.aoMudar();
+  return true;
+}
+
+/* Reescreve nas linhas da venda o cache de valor pago, situação de
+   pagamento e (opcional) nova data de vencimento. */
+function sincronizarPagamentoNaVenda(idVenda, opcoes = {}) {
+  const venda = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
+  const total = venda ? venda.total : 0;
+  const pago = totalPagoVenda(idVenda);
+  const situacao = derivarStatusPagamento(total, pago);
+  App.db.vendas.forEach((linha) => {
+    if ((linha.id_venda || linha.id) === idVenda) {
+      linha.valor_pago = pago;
+      linha.status_pagamento = situacao;
+      if (opcoes.novoVencimento !== undefined) linha.data_vencimento = opcoes.novoVencimento || "";
+    }
+  });
+}
+
+/* Saída manual de dinheiro (despesa, pró-labore, retirada...). */
+function registrarSaida(dados, opcoes = {}) {
+  const lanc = registrarLancamento({
+    tipo: "saida",
+    categoria: dados.categoria || "Outros",
+    descricao: dados.descricao || "",
+    valor: Math.abs(numero(dados.valor)),
+    destino: dados.destino,
+  });
+  if (opcoes.aoMudar) opcoes.aoMudar();
+  return lanc;
+}
+
+/* Ajuste de caixa: acerta o saldo de um destino para um valor real
+   contado, registrando a diferença e o motivo (uso raro). */
+function ajustarCaixa(destino, saldoReal, motivo, opcoes = {}) {
+  const atual = saldoDestino(destino);
+  const delta = numero(saldoReal) - atual;
+  if (Math.abs(delta) < 0.005) return null;
+  const lanc = registrarLancamento({
+    tipo: "ajuste",
+    categoria: "Ajuste de caixa",
+    descricao: motivo || "Ajuste de caixa",
+    valor: delta, // pode ser negativo
+    destino: destino,
+  });
+  if (opcoes.aoMudar) opcoes.aoMudar();
+  return lanc;
+}
+
+/* Efeito de um lançamento no saldo: entrada soma, saída subtrai, ajuste
+   usa o próprio sinal do valor. */
+function efeitoLancamento(l) {
+  if (l.tipo === "saida") return -Math.abs(numero(l.valor));
+  if (l.tipo === "ajuste") return numero(l.valor);
+  return Math.abs(numero(l.valor)); // entrada
+}
+
+function saldoDestino(destino) {
+  return (App.db.lancamentos || [])
+    .filter((l) => l.destino === destino)
+    .reduce((s, l) => s + efeitoLancamento(l), 0);
+}
+
+function saldosCaixa() {
+  const dinheiro = saldoDestino("dinheiro");
+  const banco = saldoDestino("banco");
+  return { dinheiro, banco, total: dinheiro + banco };
+}
+
+/* Devolve o dinheiro ao cliente quando um pedido pago/parcial é cancelado:
+   uma saída por destino, mantendo o histórico de pagamentos intacto. Não
+   duplica se já houver devolução registrada para a venda. */
+function registrarDevolucaoVenda(idVenda) {
+  const jaDevolvido = (App.db.lancamentos || []).some(
+    (l) => l.categoria === "Devolução" && l.id_referencia === idVenda);
+  if (jaDevolvido) return false;
+  const porDestino = { dinheiro: 0, banco: 0 };
+  pagamentosDaVenda(idVenda).forEach((p) => {
+    porDestino[destinoDaForma(p.forma_pagamento)] += numero(p.valor);
+  });
+  let criou = false;
+  ["dinheiro", "banco"].forEach((destino) => {
+    if (porDestino[destino] > 0.005) {
+      registrarLancamento({
+        tipo: "saida",
+        categoria: "Devolução",
+        descricao: `Devolução do pedido #${idVenda} (cancelado)`,
+        valor: porDestino[destino],
+        destino: destino,
+        id_referencia: idVenda,
+      }, { semSalvar: true });
+      criou = true;
+    }
+  });
+  if (criou) salvarTabela("lancamentos");
+  return criou;
+}
+
 /* ---------------- navegação ---------------- */
 
 function registrarModulo(modulo) {
@@ -759,7 +975,16 @@ function registrarModulo(modulo) {
 
 function modulosPermitidos() {
   const perfil = App.usuario?.perfil;
-  return App.modulos.filter((m) => !m.perfis || m.perfis.includes(perfil));
+  return App.modulos.filter((m) => {
+    if (m.perfis && !m.perfis.includes(perfil)) return false;
+    // Módulos financeiros (Caixa, Cobranças) só para quem tem acesso liberado.
+    if (m.financeiro && !App.usuario?.acessoFinanceiro) return false;
+    return true;
+  });
+}
+
+function temAcessoFinanceiro() {
+  return !!App.usuario?.acessoFinanceiro;
 }
 
 function navegar(rota, parametros) {

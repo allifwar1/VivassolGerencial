@@ -119,7 +119,7 @@ function formCliente(existente, aoMudar) {
     salvarTabela("clientes");
     toast(existente ? "Cliente atualizado." : "Cliente cadastrado.");
     modal.fechar();
-    if (aoMudar) aoMudar();
+    if (aoMudar) aoMudar(registro);
   });
 
   $("#cliente-excluir", corpo)?.addEventListener("click", async () => {

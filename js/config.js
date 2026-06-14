@@ -24,9 +24,16 @@ const CONFIG = {
   // Sincronização automática em segundo plano (em milissegundos):
   intervaloSyncMs: 60000,
 
-  formasPagamento: ["Pix", "Dinheiro", "Cartão de débito", "Cartão de crédito", "Fiado"],
+  formasPagamento: ["Dinheiro", "Pix", "Cartão de débito", "Cartão de crédito", "Venda a prazo"],
   statusVenda: ["Concluída", "Pendente", "Cancelada"],
   unidades: ["un", "kg", "g", "L", "ml", "cx", "pct"],
+
+  // Condição de venda em que o cliente leva agora e paga depois (fiado).
+  // Exige cliente identificado e gera uma cobrança em aberto.
+  formaPrazo: "Venda a prazo",
+
+  // Categorias das SAÍDAS do caixa (dinheiro que sai do negócio).
+  categoriasSaida: ["Compra de insumos", "Pró-labore", "Contas (água, luz, etc.)", "Retirada", "Outros"],
 
   // Etapas de produção do pedido (ordem do quadro de fluxo, da esquerda
   // para a direita). "Cancelado" fica à esquerda; "Entregue" é a última.
@@ -39,18 +46,27 @@ const CONFIG = {
   paisWhatsapp: "55",
 };
 
+// Cliente especial para vendas rápidas sem identificar a pessoa. Não fica
+// na planilha de clientes; é sempre a primeira opção na hora de vender.
+// Não pode ser usado em "Venda a prazo" (fiado exige cliente real).
+const CLIENTE_AVISTA = { id: "CLI_AVISTA", nome: "Venda à vista", avista: true, telefone: "" };
+
 // Mesmos usuários e senhas do sistema antigo (hash SHA-256 da senha).
 const USUARIOS_SISTEMA = [
+  // acessoFinanceiro: libera Caixa, Cobranças e Relatórios. Para um novo
+  // usuário, defina true (vê o financeiro) ou false (não vê).
   {
     usuario: "allif",
     nome: "Allif",
     perfil: "admin",
     senhaHash: "da567b5f09f055a646df0e74c6014785930a8d207b22964868153f872b9bf9cf",
+    acessoFinanceiro: true,
   },
   {
     usuario: "karen",
     nome: "Karen",
     perfil: "operacional",
     senhaHash: "e8026bda3ea2eedc7dc7bce9daa640f8cc0f33e335bd73d986a872b3ba789c71",
+    acessoFinanceiro: true,
   },
 ];

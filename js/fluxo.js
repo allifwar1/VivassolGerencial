@@ -98,8 +98,7 @@ function renderFluxo(el) {
       const acao = acaoEl.dataset.acao;
       if (acao === "arrastar") return;
       if (acao === "pagamento") {
-        const v = acharPedido(idVenda);
-        if (v) ciclarPagamento(idVenda, v.status_pagamento, { aoMudar: refresh });
+        abrirPagamentoVenda(idVenda, refresh);
         return;
       }
       if (acao === "anterior" || acao === "proximo") {

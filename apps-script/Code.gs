@@ -35,11 +35,17 @@ const ABAS = {
            "quantidade", "preco_unit", "subtotal", "pagamento", "status", "entrega",
            "observacoes", "criado_por", "criado_em",
            "tipo", "data_entrega", "item_pronto", "status_pagamento", "valor_pago",
-           "status_producao", "arquivado"],
+           "status_producao", "arquivado", "data_vencimento"],
+  // Histórico de recebimentos de cada venda (uma linha por pagamento).
+  pagamentos: ["id", "id_venda", "cliente_nome", "data", "valor", "forma_pagamento",
+               "criado_por", "criado_em"],
+  // Livro caixa: toda entrada/saída de dinheiro, separada por destino.
+  lancamentos: ["id", "data", "tipo", "categoria", "descricao", "valor", "destino",
+                "id_referencia", "criado_por", "criado_em"],
 };
 
 // Abas que o site lê e grava (painel_BD é só informativa).
-const ABAS_DE_DADOS = ["configuracoes", "usuarios", "clientes", "produtos", "insumos", "vendas"];
+const ABAS_DE_DADOS = ["configuracoes", "usuarios", "clientes", "produtos", "insumos", "vendas", "pagamentos", "lancamentos"];
 
 /* ---------------- instalação ---------------- */
 

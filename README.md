@@ -19,6 +19,8 @@ Vivassol Gerencial V2/
 │   ├── inicio.js         ← painel do dia
 │   ├── vendas.js         ← lista de pedidos + criação (pedido/orçamento)
 │   ├── fluxo.js          ← quadro de fluxo (Kanban) dos pedidos
+│   ├── caixa.js          ← controle de caixa (dinheiro x banco) e relatórios
+│   ├── cobrancas.js      ← vendas a prazo em aberto (fiado)
 │   ├── estoque.js        ← insumos + conferência de estoque
 │   ├── clientes.js       ← clientes
 │   ├── produtos.js       ← produtos vendidos
@@ -64,6 +66,18 @@ próprio computador, dá para abrir o `index.html` direto no navegador.
 2. Menu ⋮ → **Adicionar à tela inicial**.
 3. O sistema abre como um aplicativo, sem a barra do navegador.
 
+### Atualização: caixa, cobranças e cliente no pedido
+
+Esta versão acrescentou:
+- duas abas novas na planilha: **pagamentos** (histórico de recebimentos)
+  e **lancamentos** (livro caixa: entradas e saídas, dinheiro x banco);
+- a coluna **data_vencimento** ao final da aba **vendas**.
+
+Depois de colar o `apps-script/Code.gs` atualizado, **republique** (Implantar
+→ Gerenciar implantações → editar → Nova versão) e, de preferência, rode
+**configurarPlanilha** uma vez para já criar as abas novas. O caixa e as
+cobranças só sincronizam entre aparelhos depois desse passo.
+
 ### Atualização: pedidos e fluxo de produção
 
 Esta versão acrescentou colunas novas na aba **vendas** (tipo, data de
@@ -96,6 +110,31 @@ aparelho preserva a etapa do pedido localmente para nada se perder.
   pago/parcial, o sistema avisa antes de confirmar.
 - Pelo botão do **WhatsApp** dá para enviar (ou copiar) a mensagem do
   pedido/orçamento já formatada para o cliente.
+
+## Cliente, cobranças e caixa
+
+- **Cliente no pedido:** ao criar um pedido, primeiro escolhe-se o cliente
+  (busca sólida, igual à de produtos) e depois os produtos. Dá para
+  **cadastrar um cliente novo** ali mesmo, sem sair da tela. A opção
+  **"Venda à vista"** é sempre a primeira da lista, para vendas rápidas sem
+  identificar a pessoa.
+- **Forma de pagamento:** as vendas **à vista** (Dinheiro, Pix, cartões)
+  entram no caixa na hora — Dinheiro vai para o "dinheiro vivo"; Pix e
+  cartões para o "banco". A **Venda a prazo** (fiado) exige um cliente
+  identificado e uma data limite ("Pagar até"), e não entra no caixa até ser
+  recebida.
+- **Cobranças:** lista quem está devendo, agrupado por cliente, com saldo e
+  vencimento (vencidos em vermelho). Dá para **receber** (total ou parcial,
+  com nova data para o restante) e **cobrar pelo WhatsApp** com a mensagem
+  pronta. Cada recebimento fica no histórico do pedido e pode ser estornado.
+- **Caixa:** saldos de dinheiro e banco separados; movimentações com filtro;
+  **saídas** (com categoria e descrição) e **ajuste de caixa** (escondido,
+  com motivo obrigatório); e **relatório** por dia, semana, mês ou período
+  personalizado (faturamento, recebido, saídas por categoria, lucro bruto e
+  total a receber).
+- **Acesso:** Caixa e Cobranças aparecem só para quem tem `acessoFinanceiro`
+  em `js/config.js` (hoje: allif e karen). Para um usuário novo, defina
+  `acessoFinanceiro: true` ou `false`.
 
 ## Login
 

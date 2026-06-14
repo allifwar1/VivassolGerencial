@@ -1184,3 +1184,131 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   .board { height: calc(100dvh - 220px); }
 }
 
+/* ============================================================
+   FINANCEIRO — PDV cliente, pagamentos, cobranças e caixa
+   ============================================================ */
+
+/* cores utilitárias de texto */
+.verde { color: var(--verde-escuro); }
+.vermelho { color: var(--vermelho); }
+.amarelo { color: #b06f00; }
+.suave { color: var(--texto-suave); }
+
+/* passos do PDV */
+.bloco-passo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--texto); margin-bottom: 10px; }
+.passo-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--verde); color: #fff; font-size: 13px; font-weight: 700;
+}
+
+/* seletor de cliente (lista em fluxo, não flutuante) */
+.sugestoes-inline {
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  overflow: hidden;
+  max-height: 230px;
+  overflow-y: auto;
+  margin-top: 8px;
+  background: var(--cartao);
+}
+.sugestoes-inline:empty { display: none; }
+.sugestao-avista { background: var(--fundo); font-style: italic; }
+.sugestao-avista span { font-weight: 700; }
+
+.cliente-chip {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 12px 14px;
+  background: var(--verde-claro); border: 1px solid #cfe6d1; border-radius: 12px;
+}
+.cliente-chip.avista { background: var(--fundo); border-color: var(--borda); }
+.cliente-chip-nome { font-weight: 700; color: var(--verde-escuro); }
+.cliente-chip.avista .cliente-chip-nome { color: var(--texto); }
+.cliente-chip-x {
+  border: none; background: rgba(0, 0, 0, 0.08); color: var(--texto);
+  width: 30px; height: 30px; border-radius: 50%; font-size: 20px; line-height: 1; cursor: pointer; flex-shrink: 0;
+}
+
+.pdv-aviso-pago { font-size: 13px; margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; }
+.pdv-aviso-pago.pago { background: var(--verde-claro); color: var(--verde-escuro); }
+.pdv-aviso-pago.prazo { background: #fff4e0; color: #8a5a00; }
+.pdv-aviso-pago:empty { display: none; }
+
+/* pagamento do pedido */
+.pag-folha-badge { display: inline-block; margin-bottom: 10px; }
+.resumo-venda .saldo-linha { font-weight: 700; border-top: 1px dashed var(--borda); padding-top: 8px; margin-top: 4px; }
+.resumo-venda .saldo-linha strong { color: var(--vermelho); }
+.pag-historico { display: flex; flex-direction: column; gap: 8px; }
+.pag-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; background: var(--fundo); border-radius: 10px;
+}
+.pag-item-info { display: flex; flex-direction: column; }
+.pag-item-info small { color: var(--texto-suave); font-size: 12.5px; }
+.pag-estornar { border: none; background: none; color: var(--vermelho); font-size: 13px; cursor: pointer; text-decoration: underline; }
+.pag-quitado { text-align: center; color: var(--verde-escuro); font-weight: 700; margin-top: 12px; }
+
+.detalhe-saldo { background: #fff4e0; color: #8a5a00; border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+.detalhe-saldo.vencido { background: var(--vermelho-claro); color: var(--vermelho); }
+
+/* cobranças */
+.cobranca-cliente { background: var(--cartao); border: 1px solid var(--borda); border-left: 4px solid var(--amarelo); border-radius: 14px; padding: 12px; box-shadow: var(--sombra); }
+.cobranca-cliente.tem-atraso { border-left-color: var(--vermelho); }
+.cobranca-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.cobranca-cab-info { display: flex; flex-direction: column; }
+.cobranca-cab-info small { color: var(--texto-suave); font-size: 12.5px; }
+.cobranca-total { color: var(--vermelho); font-size: 18px; }
+.cobranca-pedidos { display: flex; flex-direction: column; gap: 8px; }
+.cobranca-pedido { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; background: var(--fundo); border-radius: 10px; }
+.cobranca-pedido.vencido { background: var(--vermelho-claro); }
+.cobranca-pedido.hoje { background: #fff4e0; }
+.cobranca-pedido-info { flex: 1; display: flex; flex-direction: column; text-align: left; border: none; background: none; cursor: pointer; padding: 0; color: inherit; }
+.cobranca-pedido-info small { color: var(--texto-suave); font-size: 12.5px; }
+.cobranca-acoes { margin-top: 10px; }
+
+.cartao-stat.stat-alerta strong { color: var(--vermelho); }
+
+/* caixa */
+.caixa-saldos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.saldo-card { background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px; padding: 14px; box-shadow: var(--sombra); }
+.saldo-card small { display: block; color: var(--texto-suave); font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+.saldo-card strong { font-size: 22px; }
+.saldo-card.dinheiro { border-top: 3px solid var(--verde); }
+.saldo-card.banco { border-top: 3px solid var(--azul); }
+.saldo-card.total { grid-column: 1 / -1; border-top: 3px solid var(--verde-escuro); background: var(--verde-claro); }
+.saldo-card.total strong { color: var(--verde-escuro); font-size: 26px; }
+
+.caixa-abas { margin: 4px 0 2px; }
+.caixa-filtros { display: flex; gap: 8px; margin-bottom: 10px; }
+.caixa-filtros .campo { flex: 1; }
+.caixa-dica { font-size: 13px; color: var(--texto-suave); background: var(--fundo); padding: 10px; border-radius: 10px; margin-top: 4px; }
+.caixa-mais { flex: 0 0 auto !important; width: 54px; }
+
+.aviso-ajuste { background: #fff4e0; color: #8a5a00; padding: 10px 12px; border-radius: 10px; font-size: 13.5px; margin-bottom: 12px; }
+
+.mov-lista { gap: 8px; }
+.mov-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 12px; background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; border-left: 4px solid var(--borda); }
+.mov-item.mov-entrada { border-left-color: var(--verde); }
+.mov-item.mov-saida { border-left-color: var(--vermelho); }
+.mov-item.mov-ajuste { border-left-color: var(--amarelo); }
+.mov-info { display: flex; flex-direction: column; min-width: 0; }
+.mov-info strong { font-size: 14.5px; }
+.mov-info small { color: var(--texto-suave); font-size: 12px; }
+.mov-lado { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.mov-valor { font-size: 15px; }
+.mov-entrada .mov-valor { color: var(--verde-escuro); }
+.mov-saida .mov-valor { color: var(--vermelho); }
+.mov-excluir { border: none; background: rgba(0, 0, 0, 0.06); width: 26px; height: 26px; border-radius: 50%; font-size: 17px; line-height: 1; cursor: pointer; color: var(--texto-suave); }
+
+.caixa-rel-periodo { margin-bottom: 10px; }
+.caixa-personalizado { display: flex; gap: 10px; margin-bottom: 8px; }
+.caixa-personalizado .rotulo { flex: 1; }
+.rel-intervalo { text-align: center; color: var(--texto-suave); font-size: 13px; margin: 0 0 12px; }
+.rel-bloco { background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; box-shadow: var(--sombra); }
+.rel-linha { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.rel-linha.sub { padding-left: 8px; font-size: 13.5px; }
+.rel-linha.total { border-top: 1px solid var(--borda); margin-top: 4px; padding-top: 8px; font-weight: 700; }
+.rel-linha.destaque { font-size: 16px; }
+.rel-linha.destaque strong { font-size: 18px; }
+.rel-linha.lucro strong { color: var(--verde-escuro); }
+

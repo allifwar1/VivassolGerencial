@@ -31,6 +31,13 @@ registrarModulo({
     const baixos = App.db.insumos.filter((i) => numero(i.quantidade) <= numero(i.estoque_minimo));
     const ultimas = pedidos.slice(0, 5);
 
+    // Cobranças vencidas (vendas a prazo em atraso) — só para quem vê o financeiro.
+    const aReceber = temAcessoFinanceiro()
+      ? pedidos.filter((v) => v.status_producao !== "Cancelado" && v.cliente_id !== CLIENTE_AVISTA.id && v.saldo > 0.005)
+      : [];
+    const vencidos = aReceber.filter((v) => situacaoEntrega(v.data_vencimento, v.status_producao) === "atrasado");
+    const totalVencido = vencidos.reduce((s, v) => s + v.saldo, 0);
+
     el.innerHTML = `
       <div class="pagina">
         <p class="saudacao">${saudacao()}, <strong>${esc(App.usuario.nome)}</strong>!</p>
@@ -58,6 +65,14 @@ registrarModulo({
               <small>${atrasados.length && entregasHoje.length ? `e ${entregasHoje.length} para entregar hoje` : "Toque para abrir o fluxo"}</small>
             </div>
           </button>` : ""}
+        ${vencidos.length ? `
+          <button type="button" class="aviso-entrega tem-atraso" id="inicio-cobrancas">
+            💰
+            <div>
+              <strong>${vencidos.length} cobrança(s) vencida(s) · ${dinheiro(totalVencido)}</strong>
+              <small>Toque para abrir as Cobranças</small>
+            </div>
+          </button>` : ""}
         ${baixos.length ? `
           <button type="button" class="aviso-estoque" id="inicio-estoque-baixo">
             ${ICONES.estoque}
@@ -75,6 +90,7 @@ registrarModulo({
     $("#inicio-novo-pedido", el).addEventListener("click", () => navegar("vendas", { abrirPdv: true, tipo: "Pedido" }));
     $("#inicio-orcamento", el).addEventListener("click", () => navegar("vendas", { abrirPdv: true, tipo: "Orçamento" }));
     $("#inicio-entregas", el)?.addEventListener("click", () => navegar("fluxo"));
+    $("#inicio-cobrancas", el)?.addEventListener("click", () => navegar("cobrancas"));
     $("#inicio-estoque-baixo", el)?.addEventListener("click", () => navegar("estoque"));
     $("#inicio-ultimas", el).addEventListener("click", (e) => {
       const card = e.target.closest(".cartao-venda");
