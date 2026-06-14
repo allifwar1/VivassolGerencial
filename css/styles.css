@@ -1025,6 +1025,16 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   .fluxo-dica-girar { display: block; }
 }
 
+/* ---- celular: colunas em tamanho normal, cartões não transbordam ---- */
+@media (max-width: 899px) {
+  /* overflow-x: clip corta horizontalmente sem quebrar o cabeçalho fixo (sticky) */
+  .coluna-fluxo { overflow-x: clip; }
+  /* o seletor de ordenação ocupa a linha inteira, fácil de tocar */
+  .fluxo-ordenar-rotulo { width: 100%; }
+  .fluxo-ordenar-rotulo .campo-mini { flex: 1; }
+  .fluxo-acoes { width: 100%; }
+}
+
 .board {
   display: flex;
   gap: 12px;

@@ -203,8 +203,19 @@ function renderFluxo(el) {
   });
 }
 
-/* Calcula o zoom ideal para que todas as colunas caibam na largura disponível. */
+/* Calcula o zoom ideal para que todas as colunas caibam na largura disponível.
+   Só no computador (>=900px). No celular as colunas ficam em tamanho normal e
+   rolam na horizontal — espremer 6 colunas numa tela pequena fica ilegível. */
+function _ehDesktopFluxo() {
+  return window.matchMedia("(min-width: 900px)").matches;
+}
+
 function _autoZoomFluxo(el, board) {
+  if (!_ehDesktopFluxo()) {
+    fluxoEsc = 1;
+    board.style.setProperty("--esc", "1");
+    return;
+  }
   const disponivel = el.clientWidth - 24;
   if (disponivel < 100) return;
   const numCols = CONFIG.statusProducao.length;
