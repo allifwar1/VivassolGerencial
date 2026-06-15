@@ -1096,6 +1096,7 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 .coluna-fluxo {
   flex: 0 0 auto;
   width: calc(17em * var(--esc, 1));
+  min-height: calc(100dvh - 160px);
   display: flex;
   flex-direction: column;
   background: var(--fundo);
