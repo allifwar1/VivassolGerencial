@@ -41,20 +41,27 @@ function uid(prefixo) {
   return `${prefixo || "id"}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/* Os geradores consideram um "piso" guardado em configuracoes: o maior id já
+   usado, incluindo registros ARQUIVADOS (que não estão carregados). Assim um
+   id novo nunca colide com um arquivado, mesmo que a tabela ativa esteja vazia. */
+function pisoId(tabela) {
+  return parseInt(obterConfig("piso_id_" + tabela, 0), 10) || 0;
+}
+
 function gerarId(prefixo, tabela) {
-  const max = App.db[tabela].reduce((m, r) => {
+  const maxAtivo = App.db[tabela].reduce((m, r) => {
     const n = parseInt(String(r.id).replace(prefixo, "")) || 0;
     return Math.max(m, n);
   }, 0);
-  return `${prefixo}${max + 1}`;
+  return `${prefixo}${Math.max(maxAtivo, pisoId(tabela)) + 1}`;
 }
 
 function gerarIdVenda() {
-  const max = App.db.vendas.reduce((m, v) => {
+  const maxAtivo = App.db.vendas.reduce((m, v) => {
     const n = parseInt(String(v.id_venda).replace("VDA", "")) || 0;
     return Math.max(m, n);
   }, 0);
-  return `VDA${max + 1}`;
+  return `VDA${Math.max(maxAtivo, pisoId("vendas")) + 1}`;
 }
 
 function esc(valor) {
@@ -1060,6 +1067,52 @@ async function arquivarAgora(meses) {
   }
 }
 
+/* Resumo do que está arquivado no servidor (totais, último lote, intervalo). */
+async function resumoArquivo() {
+  return chamarApi("resumoArquivo");
+}
+
+/* Quantos registros seriam restaurados, sem mover nada (preview). */
+async function contarRestauro(payload) {
+  return chamarApi("restaurarArquivo", Object.assign({ apenasContar: true }, payload));
+}
+
+/* Restaura dados do arquivo de volta para as abas ativas e re-sincroniza.
+   Exige que não haja nada pendente de envio (para não perder alterações). */
+async function restaurarArquivoAgora(payload) {
+  if (!apiConfigurada()) { toast("Conecte a planilha primeiro.", "erro"); return false; }
+  if (App.tabelasPendentes.size > 0) {
+    await sincronizar({ forcar: true });
+    if (App.tabelasPendentes.size > 0) {
+      toast("Há dados ainda não sincronizados. Tente de novo em instantes.", "erro");
+      return false;
+    }
+  }
+  try {
+    const resultado = await chamarApi("restaurarArquivo", payload);
+    await sincronizar({ forcar: true });
+    return resultado;
+  } catch (e) {
+    toast("Falha ao restaurar: " + e.message, "erro");
+    return false;
+  }
+}
+
+/* ---------------- intervalo de sincronização ---------------- */
+
+/* Intervalo de sincronização automática, em ms. Lê de configuracoes (em
+   segundos); cai no padrão de config.js se não houver valor salvo. */
+function intervaloSyncMs() {
+  const seg = parseInt(obterConfig("intervalo_sync_seg", 0), 10) || 0;
+  if (seg >= 5) return seg * 1000;
+  return CONFIG.intervaloSyncMs || 60000;
+}
+
+function reiniciarTimerSync() {
+  clearInterval(App.timerSync);
+  App.timerSync = setInterval(() => sincronizar(), intervaloSyncMs());
+}
+
 /* ---------------- navegação ---------------- */
 
 function registrarModulo(modulo) {
@@ -1249,8 +1302,7 @@ function entrar(cadastro) {
   navegar("inicio");
   atualizarStatus(apiConfigurada() ? "sincronizando" : "sem-config");
   sincronizar();
-  clearInterval(App.timerSync);
-  App.timerSync = setInterval(() => sincronizar(), CONFIG.intervaloSyncMs || 60000);
+  reiniciarTimerSync();
 }
 
 async function sair() {

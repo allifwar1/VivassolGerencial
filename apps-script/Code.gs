@@ -50,10 +50,11 @@ const ABAS_DE_DADOS = ["configuracoes", "usuarios", "clientes", "produtos", "ins
 // Abas de ARQUIVO: para onde vão os dados antigos já finalizados, mantendo
 // as abas "ativas" pequenas para o app continuar rápido. NÃO são lidas pelo
 // site (não entram em ABAS_DE_DADOS) — servem só de histórico consultável.
-// Têm exatamente as mesmas colunas das abas originais.
-ABAS.vendas_arquivo = ABAS.vendas;
-ABAS.pagamentos_arquivo = ABAS.pagamentos;
-ABAS.lancamentos_arquivo = ABAS.lancamentos;
+// Têm as mesmas colunas das abas originais + "data_arquivo" (carimbo de
+// quando o registro foi movido, usado para desfazer um arquivamento).
+ABAS.vendas_arquivo = ABAS.vendas.concat(["data_arquivo"]);
+ABAS.pagamentos_arquivo = ABAS.pagamentos.concat(["data_arquivo"]);
+ABAS.lancamentos_arquivo = ABAS.lancamentos.concat(["data_arquivo"]);
 
 /* ---------------- instalação ---------------- */
 
@@ -134,6 +135,14 @@ function doPost(e) {
       var meses = Number(corpo.payload && corpo.payload.meses) || 12;
       if (meses < 1) meses = 1;
       return resposta({ ok: true, dados: arquivarAntigos(meses) });
+    }
+
+    if (corpo.acao === "resumoArquivo") {
+      return resposta({ ok: true, dados: resumoArquivo() });
+    }
+
+    if (corpo.acao === "restaurarArquivo") {
+      return resposta({ ok: true, dados: restaurarArquivo(corpo.payload || {}) });
     }
 
     return resposta({ ok: false, erro: "Ação desconhecida: " + corpo.acao });
@@ -234,20 +243,15 @@ function arquivarAntigos(meses) {
   trava.waitLock(30000);
   try {
     const ss = SpreadsheetApp.getActive();
-    const corte = dataCorte_(meses); // "YYYY-MM-DD"
+    const corte = dataCorte_(meses);           // "YYYY-MM-DD"
+    const lote = new Date().toISOString();      // carimbo deste arquivamento
 
     // ---------- LANÇAMENTOS ----------
     const lancs = lerTabela(ss, "lancamentos");
     const lancAntigos = [], lancRecentes = [];
-    let addDin = 0, addBanco = 0;
     lancs.forEach(function (l) {
-      if (diaDe_(l.data) && diaDe_(l.data) < corte) {
-        lancAntigos.push(l);
-        const ef = efeitoLanc_(l);
-        if (String(l.destino) === "banco") addBanco += ef; else addDin += ef;
-      } else {
-        lancRecentes.push(l);
-      }
+      if (diaDe_(l.data) && diaDe_(l.data) < corte) lancAntigos.push(l);
+      else lancRecentes.push(l);
     });
 
     // ---------- VENDAS + PAGAMENTOS ----------
@@ -287,27 +291,194 @@ function arquivarAntigos(meses) {
       if (arquivarVenda[p.id_venda]) pagAntigos.push(p); else pagRecentes.push(p);
     });
 
+    // Nada a fazer? Sai sem mexer em nada.
+    if (!lancAntigos.length && !vendasAntigas.length && !pagAntigos.length) {
+      return { vendas: 0, pagamentos: 0, lancamentos: 0, lote: "" };
+    }
+
+    // Carimba o lote em cada linha movida.
+    lancAntigos.forEach(function (l) { l.data_arquivo = lote; });
+    vendasAntigas.forEach(function (v) { v.data_arquivo = lote; });
+    pagAntigos.forEach(function (p) { p.data_arquivo = lote; });
+
     // ---------- Grava arquivos (anexa ao que já existir) ----------
     if (lancAntigos.length) anexarArquivo_(ss, "lancamentos_arquivo", lancAntigos);
     if (vendasAntigas.length) anexarArquivo_(ss, "vendas_arquivo", vendasAntigas);
     if (pagAntigos.length) anexarArquivo_(ss, "pagamentos_arquivo", pagAntigos);
-
-    // ---------- Atualiza saldo inicial + carimbo em configuracoes ----------
-    const cfg = lerTabela(ss, "configuracoes");
-    if (addDin !== 0) setConfig_(cfg, "saldo_inicial_dinheiro", arred2_((Number(lerConfig_(cfg, "saldo_inicial_dinheiro")) || 0) + addDin));
-    if (addBanco !== 0) setConfig_(cfg, "saldo_inicial_banco", arred2_((Number(lerConfig_(cfg, "saldo_inicial_banco")) || 0) + addBanco));
-    setConfig_(cfg, "ultimo_arquivamento", new Date().toISOString());
-    escreverTabela_(ss, "configuracoes", cfg);
 
     // ---------- Reescreve as abas ativas sem os antigos ----------
     if (lancAntigos.length) escreverTabela_(ss, "lancamentos", lancRecentes);
     if (vendasAntigas.length) escreverTabela_(ss, "vendas", vendasRecentes);
     if (pagAntigos.length) escreverTabela_(ss, "pagamentos", pagRecentes);
 
-    return { vendas: vendasAntigas.length, pagamentos: pagAntigos.length, lancamentos: lancAntigos.length };
+    // ---------- Atualiza configuracoes (saldo inicial, pisos, carimbos) ----------
+    const cfg = lerTabela(ss, "configuracoes");
+    recomputarSaldoInicial_(ss, cfg);  // recalcula do zero a partir de lancamentos_arquivo
+    atualizarPisosIds_(cfg, vendas, lancs, pagamentos); // antes da remoção: têm os maiores ids
+    setConfig_(cfg, "ultimo_arquivamento", lote);
+    setConfig_(cfg, "janela_meses", String(meses));
+    escreverTabela_(ss, "configuracoes", cfg);
+
+    return { vendas: vendasAntigas.length, pagamentos: pagAntigos.length, lancamentos: lancAntigos.length, lote: lote };
   } finally {
     trava.releaseLock();
   }
+}
+
+/* Recalcula o saldo inicial de cada destino a partir do NET de TODOS os
+   lançamentos que estão no arquivo. Invariante: o saldo do caixa é sempre
+   saldo_inicial + soma(lançamentos ativos), independente de onde está o
+   corte — vale tanto ao arquivar quanto ao restaurar. */
+function recomputarSaldoInicial_(ss, cfg) {
+  const arq = lerTabela(ss, "lancamentos_arquivo");
+  let din = 0, banco = 0;
+  arq.forEach(function (l) {
+    const ef = efeitoLanc_(l);
+    if (String(l.destino) === "banco") banco += ef; else din += ef;
+  });
+  setConfig_(cfg, "saldo_inicial_dinheiro", arred2_(din));
+  setConfig_(cfg, "saldo_inicial_banco", arred2_(banco));
+}
+
+/* Guarda o maior número de id já usado (ativo + arquivado) por tabela, para
+   o app NUNCA gerar um id que colida com um registro arquivado. */
+function atualizarPisosIds_(cfg, vendas, lancs, pagamentos) {
+  const maxNum = function (linhas, campo, prefixo) {
+    let m = 0;
+    linhas.forEach(function (r) {
+      const n = parseInt(String(r[campo] || "").replace(prefixo, ""), 10) || 0;
+      if (n > m) m = n;
+    });
+    return m;
+  };
+  const subir = function (chave, valor) {
+    const atual = parseInt(lerConfig_(cfg, chave), 10) || 0;
+    setConfig_(cfg, chave, Math.max(atual, valor));
+  };
+  subir("piso_id_vendas", maxNum(vendas, "id_venda", "VDA"));
+  subir("piso_id_lancamentos", maxNum(lancs, "id", "LAN"));
+  subir("piso_id_pagamentos", maxNum(pagamentos, "id", "PAG"));
+}
+
+/* ============================================================
+   RESTAURAÇÃO DE DADOS ARQUIVADOS
+   Devolve registros das abas *_arquivo para as abas ativas.
+   - modo "ultimo": desfaz o arquivamento mais recente (mesmo carimbo).
+   - modo "periodo": devolve registros cuja DATA ORIGINAL esteja no
+     intervalo [de, ate].
+   Com apenasContar=true, só calcula quantos seriam restaurados.
+   O saldo inicial é sempre recalculado do zero ao final.
+   ============================================================ */
+
+function restaurarArquivo(p) {
+  const modo = p && p.modo === "periodo" ? "periodo" : "ultimo";
+  const de = diaDe_(p && p.de);
+  const ate = diaDe_(p && p.ate);
+  const apenasContar = !!(p && p.apenasContar);
+
+  const trava = LockService.getScriptLock();
+  trava.waitLock(30000);
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const vendasArq = lerTabela(ss, "vendas_arquivo");
+    const pagArq = lerTabela(ss, "pagamentos_arquivo");
+    const lancArq = lerTabela(ss, "lancamentos_arquivo");
+
+    // Define o critério de seleção.
+    let loteAlvo = "";
+    if (modo === "ultimo") {
+      [vendasArq, pagArq, lancArq].forEach(function (lista) {
+        lista.forEach(function (r) { if (String(r.data_arquivo) > loteAlvo) loteAlvo = String(r.data_arquivo); });
+      });
+    }
+    const selVenda = function (v) {
+      return modo === "ultimo" ? String(v.data_arquivo) === loteAlvo
+        : (diaDe_(v.data) >= de && diaDe_(v.data) <= ate);
+    };
+    const selLanc = function (l) {
+      return modo === "ultimo" ? String(l.data_arquivo) === loteAlvo
+        : (diaDe_(l.data) >= de && diaDe_(l.data) <= ate);
+    };
+
+    // Vendas a restaurar e o conjunto de id_venda (os pagamentos seguem a venda).
+    const vendasRestaurar = [], vendasManter = [];
+    const idsRestaurar = {};
+    vendasArq.forEach(function (v) {
+      if (selVenda(v)) { vendasRestaurar.push(v); idsRestaurar[v.id_venda || v.id] = true; }
+      else vendasManter.push(v);
+    });
+    const pagRestaurar = [], pagManter = [];
+    pagArq.forEach(function (p) {
+      if (idsRestaurar[p.id_venda]) pagRestaurar.push(p); else pagManter.push(p);
+    });
+    const lancRestaurar = [], lancManter = [];
+    lancArq.forEach(function (l) {
+      if (selLanc(l)) lancRestaurar.push(l); else lancManter.push(l);
+    });
+
+    const resultado = { vendas: vendasRestaurar.length, pagamentos: pagRestaurar.length, lancamentos: lancRestaurar.length, lote: loteAlvo };
+    if (apenasContar) return resultado;
+    if (!vendasRestaurar.length && !pagRestaurar.length && !lancRestaurar.length) return resultado;
+
+    // Remove o carimbo antes de devolver às abas ativas (ignorado de qualquer
+    // forma, pois as abas ativas não têm a coluna data_arquivo).
+    [vendasRestaurar, pagRestaurar, lancRestaurar].forEach(function (lista) {
+      lista.forEach(function (r) { delete r.data_arquivo; });
+    });
+
+    // Junta com o que já está ativo e reescreve.
+    if (vendasRestaurar.length) escreverTabela_(ss, "vendas", lerTabela(ss, "vendas").concat(vendasRestaurar));
+    if (pagRestaurar.length) escreverTabela_(ss, "pagamentos", lerTabela(ss, "pagamentos").concat(pagRestaurar));
+    if (lancRestaurar.length) escreverTabela_(ss, "lancamentos", lerTabela(ss, "lancamentos").concat(lancRestaurar));
+
+    // Reescreve as abas de arquivo sem os restaurados.
+    if (vendasRestaurar.length) escreverTabela_(ss, "vendas_arquivo", vendasManter);
+    if (pagRestaurar.length) escreverTabela_(ss, "pagamentos_arquivo", pagManter);
+    if (lancRestaurar.length) escreverTabela_(ss, "lancamentos_arquivo", lancManter);
+
+    // Recalcula o saldo inicial a partir do que SOBROU no arquivo.
+    const cfg = lerTabela(ss, "configuracoes");
+    recomputarSaldoInicial_(ss, cfg);
+    escreverTabela_(ss, "configuracoes", cfg);
+
+    return resultado;
+  } finally {
+    trava.releaseLock();
+  }
+}
+
+/* Resumo do que está arquivado (para a tela de gerenciamento). */
+function resumoArquivo() {
+  const ss = SpreadsheetApp.getActive();
+  const vendasArq = lerTabela(ss, "vendas_arquivo");
+  const pagArq = lerTabela(ss, "pagamentos_arquivo");
+  const lancArq = lerTabela(ss, "lancamentos_arquivo");
+
+  // Último lote (carimbo mais recente) e suas contagens.
+  let lote = "";
+  [vendasArq, pagArq, lancArq].forEach(function (lista) {
+    lista.forEach(function (r) { if (String(r.data_arquivo) > lote) lote = String(r.data_arquivo); });
+  });
+  const contarLote = function (lista) {
+    return lista.filter(function (r) { return String(r.data_arquivo) === lote; }).length;
+  };
+
+  // Intervalo de datas ORIGINAIS no arquivo (para orientar a restauração por período).
+  let min = "", max = "";
+  [vendasArq, lancArq].forEach(function (lista) {
+    lista.forEach(function (r) {
+      const d = diaDe_(r.data);
+      if (!d) return;
+      if (!min || d < min) min = d;
+      if (!max || d > max) max = d;
+    });
+  });
+
+  return {
+    totais: { vendas: vendasArq.length, pagamentos: pagArq.length, lancamentos: lancArq.length },
+    ultimoLote: { data: lote, vendas: contarLote(vendasArq), pagamentos: contarLote(pagArq), lancamentos: contarLote(lancArq) },
+    intervalo: { min: min, max: max },
+  };
 }
 
 /* Anexa linhas ao final de uma aba de arquivo (sem apagar o que já tem). */
