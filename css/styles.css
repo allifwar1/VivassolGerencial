@@ -31,7 +31,48 @@
   --st-pronto: #1e88e5;
   --st-entregue: #2e7d32;
   --azul: #1e88e5;
+
+  /* Cores da logo Vivassol (arco-íris) — usadas nos painéis de início */
+  --marca-1: #ed1c45; --marca-2: #f7941d; --marca-3: #fbb40f;
+  --marca-4: #39b54a; --marca-5: #00a99d; --marca-6: #2e9bd6;
+  --marca-7: #3a5bc7; --marca-8: #7e3f98; --marca-9: #c7268c;
 }
+
+/* ===================== TEMA ESCURO ===================== */
+[data-tema="escuro"] {
+  --verde: #4caf50;
+  --verde-escuro: #8fd694;
+  --verde-claro: #1c2e1e;
+  --amarelo: #ffca28;
+  --fundo: #14181b;
+  --cartao: #1d2328;
+  --texto: #e7ece8;
+  --texto-suave: #9fb0a6;
+  --borda: #2c343a;
+  --vermelho: #ef5350;
+  --vermelho-claro: #3a2222;
+  --laranja: #ffa726;
+  --laranja-claro: #382a16;
+  --azul: #42a5f5;
+  --sombra: 0 1px 3px rgba(0, 0, 0, 0.45);
+
+  --st-cancelado: #ef5350;
+  --st-orcamento: #90a4ae;
+  --st-pedido: #b0bec5;
+  --st-producao: #ffca28;
+  --st-pronto: #42a5f5;
+  --st-entregue: #66bb6a;
+}
+
+/* Ajustes pontuais de fundos claros embutidos (legíveis no escuro) */
+[data-tema="escuro"] .pdv-aviso-pago.prazo,
+[data-tema="escuro"] .detalhe-saldo,
+[data-tema="escuro"] .cobranca-pedido.hoje,
+[data-tema="escuro"] .aviso-ajuste { background: #3a2f16; color: #ffd98a; }
+[data-tema="escuro"] .ini3-al-azul,
+[data-tema="escuro"] .ini4-al-azul { background: #16304a; }
+[data-tema="escuro"] .mov-excluir { background: rgba(255, 255, 255, 0.12); }
+[data-tema="escuro"] .opcao-status.atual { outline-color: rgba(255, 255, 255, 0.3); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -124,6 +165,24 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 @keyframes pulsar { 50% { opacity: 0.35; } }
 
 #status-texto { display: none; }
+
+.botao-tema {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--borda);
+  background: var(--fundo);
+  color: var(--texto-suave);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.18s ease, color 0.2s, background 0.2s;
+}
+.botao-tema:hover { color: var(--texto); }
+.botao-tema:active { transform: scale(0.88) rotate(-18deg); }
+.botao-tema svg { width: 20px; height: 20px; }
 
 #conteudo {
   flex: 1;
@@ -769,6 +828,7 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
     position: sticky;
     top: 0;
     height: 100dvh;
+    overflow-y: auto;
   }
 
   .lateral-marca {
@@ -1785,3 +1845,246 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
 .ini5-lanc-info strong { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ini5-lanc-info small { color: var(--texto-suave); font-size: 11.5px; }
 .ini5-lanc-val { font-size: 13.5px; font-weight: 700; flex-shrink: 0; }
+
+/* ════════════════════════════════════════════════════════════
+   PAINÉIS DE INÍCIO 6–10 — animações, lançador e dashboards
+   ════════════════════════════════════════════════════════════ */
+
+/* Animação de entrada (com respeito a prefers-reduced-motion) */
+.ini-rise { opacity: 0; animation: ini-rise 0.5s ease forwards; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes ini-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.ini-area-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ini-draw 1.1s 0.15s ease forwards; }
+@keyframes ini-draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ini-rise { animation: none; opacity: 1; transform: none; }
+  .ini-area-line { animation: none; stroke-dashoffset: 0; }
+}
+
+/* ── Lançador de apps (compartilhado) ─────────────────────── */
+.ini-launcher {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 10px;
+}
+.ini-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px;
+  background: var(--cartao);
+  border: 1px solid var(--borda);
+  border-radius: 16px;
+  cursor: pointer;
+  color: var(--texto);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s;
+}
+.ini-app:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); border-color: var(--cor); }
+.ini-app:active { transform: translateY(0) scale(0.97); }
+.ini-app-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--cor) 16%, var(--cartao));
+  color: var(--cor);
+}
+.ini-app-ico svg { width: 24px; height: 24px; }
+.ini-app-nome { font-size: 12.5px; font-weight: 600; text-align: center; line-height: 1.2; }
+
+/* ── Layout 6 — Central ───────────────────────────────────── */
+.ini6-hero {
+  border-radius: 20px;
+  padding: 20px;
+  color: #fff;
+  background: linear-gradient(120deg, var(--marca-1), var(--marca-2), var(--marca-4), var(--marca-6), var(--marca-8));
+  background-size: 280% 280%;
+  animation: ini6-flow 14s ease infinite;
+}
+@keyframes ini6-flow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@media (prefers-reduced-motion: reduce) { .ini6-hero { animation: none; } }
+.ini6-hero-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.ini6-sauda { font-size: 14px; opacity: 0.9; }
+.ini6-nome { font-size: 22px; font-weight: 800; line-height: 1.1; }
+.ini6-data { background: rgba(255, 255, 255, 0.25); padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.ini6-fat { margin: 16px 0 14px; }
+.ini6-fat small { font-size: 12px; opacity: 0.85; display: block; }
+.ini6-fat strong { font-size: 34px; font-weight: 800; letter-spacing: -0.5px; }
+.ini6-mini { display: flex; gap: 8px; }
+.ini6-mini div { flex: 1; background: rgba(255, 255, 255, 0.18); border-radius: 12px; padding: 8px; text-align: center; backdrop-filter: blur(2px); }
+.ini6-mini strong { font-size: 19px; display: block; }
+.ini6-mini span { font-size: 10.5px; opacity: 0.85; }
+
+.ini6-alerta {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--cartao); border: 1px solid var(--borda); border-left: 4px solid var(--laranja);
+  border-radius: 14px; padding: 12px 14px; width: 100%; text-align: left; cursor: pointer;
+}
+.ini6-alerta-ico { font-size: 18px; }
+.ini6-alerta-txt { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--texto); }
+.ini6-alerta-seta { font-size: 22px; color: var(--texto-suave); }
+.ini6-ok { background: var(--verde-claro); color: var(--verde-escuro); border-radius: 14px; padding: 14px; text-align: center; font-weight: 600; font-size: 14px; }
+.ini6-acoes { display: flex; gap: 10px; }
+.ini6-acoes .btn { flex: 1; }
+
+/* ── Layout 7 — Painel Pro ────────────────────────────────── */
+.ini7-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ini7-sauda { font-size: 16px; }
+.ini7-sauda strong { color: var(--verde-escuro); }
+.ini7-date { font-size: 12px; color: var(--texto-suave); text-transform: capitalize; }
+.ini7-np { flex-shrink: 0; padding: 11px 16px; }
+
+.ini7-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ini7-kpi {
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px;
+  padding: 12px 14px; border-top: 3px solid var(--c, var(--verde)); position: relative; overflow: hidden;
+}
+.ini7-kpi small { font-size: 11.5px; color: var(--texto-suave); font-weight: 600; }
+.ini7-kpi strong { display: block; font-size: 21px; color: var(--texto); margin: 2px 0; letter-spacing: -0.3px; }
+.ini7-kpi span { font-size: 11px; color: var(--texto-suave); }
+
+.ini7-grafico { background: var(--cartao); border: 1px solid var(--borda); border-radius: 16px; padding: 14px; }
+.ini7-grafico-cab { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12.5px; color: var(--texto-suave); }
+.ini7-grafico-cab strong { color: var(--verde-escuro); }
+
+.ini7-pipe { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.ini7-pipe-item {
+  flex: 1; min-width: 70px; background: var(--cartao); border: 1px solid var(--borda);
+  border-bottom: 3px solid var(--c, var(--borda)); border-radius: 12px; padding: 10px 8px; text-align: center;
+}
+.ini7-pipe-item strong { font-size: 20px; color: var(--c, var(--texto)); display: block; }
+.ini7-pipe-item small { font-size: 10px; color: var(--texto-suave); white-space: nowrap; }
+
+/* ── Layout 8 — Radar ─────────────────────────────────────── */
+.ini8-topo { display: flex; align-items: center; justify-content: space-between; }
+.ini8-sauda { font-size: 16px; }
+.ini8-sauda strong { color: var(--verde-escuro); }
+.ini8-np { flex-shrink: 0; padding: 11px 16px; }
+
+.ini8-radar {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: 16px; padding: 16px;
+}
+.ini8-anel { flex-shrink: 0; }
+.ini8-legenda { flex: 1; display: flex; flex-direction: column; gap: 7px; }
+.ini8-leg-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ini8-leg-cor { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.ini8-leg-nome { flex: 1; color: var(--texto-suave); }
+.ini8-leg-item strong { font-size: 14px; }
+
+.ini8-pend { display: flex; flex-direction: column; gap: 8px; }
+.ini8-pend-item {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px;
+  border: none; border-left: 4px solid var(--borda); width: 100%; text-align: left; cursor: pointer;
+  background: var(--cartao); border: 1px solid var(--borda);
+}
+.ini8-pend-ico { font-size: 17px; }
+.ini8-pend-txt { flex: 1; font-size: 13.5px; font-weight: 600; }
+.ini8-pend-seta { font-size: 20px; color: var(--texto-suave); }
+.ini8-verm  { border-left: 4px solid var(--vermelho); }
+.ini8-laran { border-left: 4px solid var(--laranja); }
+.ini8-azul  { border-left: 4px solid var(--azul); }
+.ini8-ok { background: var(--verde-claro); color: var(--verde-escuro); border-radius: 12px; padding: 14px; text-align: center; font-weight: 600; }
+.ini8-resumo { display: flex; gap: 10px; }
+.ini8-resumo div { flex: 1; background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 12px 14px; }
+.ini8-resumo small { font-size: 11.5px; color: var(--texto-suave); display: block; }
+.ini8-resumo strong { font-size: 18px; color: var(--verde-escuro); }
+
+/* ── Layout 9 — Bento ─────────────────────────────────────── */
+.ini9-pag { display: flex; flex-direction: column; gap: 14px; }
+.ini9-saud p { font-size: 17px; }
+.ini9-saud strong { color: var(--verde-escuro); }
+.ini9-bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.ini9-card { background: var(--cartao); border: 1px solid var(--borda); border-radius: 16px; padding: 14px; }
+
+.ini9-fat {
+  grid-column: span 6; color: #fff;
+  background: linear-gradient(130deg, var(--marca-6), var(--marca-8));
+}
+.ini9-fat small { font-size: 12px; opacity: 0.85; }
+.ini9-fat strong { display: block; font-size: 30px; font-weight: 800; margin: 2px 0; letter-spacing: -0.5px; }
+.ini9-fat span { font-size: 12px; opacity: 0.85; }
+
+.ini9-acao {
+  grid-column: span 6; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  background: var(--verde); color: #fff; border: none; font-size: 16px; font-weight: 700;
+}
+.ini9-acao-ico { font-size: 26px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.22); border-radius: 12px; }
+
+.ini9-num { grid-column: span 2; text-align: center; display: flex; flex-direction: column; gap: 2px; }
+.ini9-num strong { font-size: 26px; color: var(--verde-escuro); }
+.ini9-num small { font-size: 11.5px; color: var(--texto-suave); }
+.ini9-num-warn strong { color: var(--vermelho); }
+
+.ini9-chart { grid-column: span 6; }
+.ini9-chart small, .ini9-top small, .ini9-entregas small { font-size: 12px; color: var(--texto-suave); font-weight: 600; display: block; margin-bottom: 8px; }
+.ini9-top { grid-column: span 6; }
+.ini9-top-lista { display: flex; flex-direction: column; gap: 8px; }
+.ini9-top-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.ini9-top-nome { flex: 0 0 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ini9-top-barra { flex: 1; height: 8px; background: var(--fundo); border-radius: 4px; overflow: hidden; }
+.ini9-top-barra span { display: block; height: 100%; background: linear-gradient(90deg, var(--marca-4), var(--marca-5)); border-radius: 4px; }
+.ini9-top-qtd { flex-shrink: 0; font-weight: 700; color: var(--verde-escuro); }
+
+.ini9-entregas { grid-column: span 6; }
+.ini9-ent-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  background: var(--fundo); border: none; border-left: 3px solid var(--borda); border-radius: 10px;
+  padding: 9px 12px; margin-bottom: 6px; cursor: pointer; text-align: left;
+}
+.ini9-ent-item:last-child { margin-bottom: 0; }
+.ini9-ent-nome { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ini9-ent-data { font-size: 12px; color: var(--texto-suave); flex-shrink: 0; }
+.ini9-sit-atrasado { border-left-color: var(--vermelho); }
+.ini9-sit-hoje { border-left-color: var(--laranja); }
+.ini9-sit-futuro { border-left-color: var(--verde); }
+.ini9-vazio { font-size: 12.5px; color: var(--texto-suave); padding: 6px 0; }
+
+/* ── Layout 10 — Agenda ───────────────────────────────────── */
+.ini10-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: 18px; padding: 18px 20px;
+}
+.ini10-sauda { font-size: 14px; color: var(--texto-suave); }
+.ini10-sauda strong { color: var(--texto); }
+.ini10-fat { font-size: 32px; font-weight: 800; color: var(--verde-escuro); letter-spacing: -0.5px; line-height: 1.1; }
+.ini10-sub { font-size: 12.5px; color: var(--texto-suave); }
+.ini10-ring { flex-shrink: 0; }
+
+.ini10-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ini10-kpis div { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 10px 6px; text-align: center; }
+.ini10-kpis strong { font-size: 19px; color: var(--verde-escuro); display: block; }
+.ini10-kpis small { font-size: 10.5px; color: var(--texto-suave); }
+.ini10-warn strong { color: var(--vermelho); }
+.ini10-acoes { display: flex; gap: 10px; }
+.ini10-acoes .btn { flex: 1; }
+
+.ini10-timeline { display: flex; flex-direction: column; }
+.ini10-tl-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: none; padding: 8px 0; position: relative;
+}
+.ini10-tl-marca { width: 13px; height: 13px; border-radius: 50%; background: var(--verde); flex-shrink: 0; border: 3px solid var(--cartao); box-shadow: 0 0 0 2px var(--verde); position: relative; z-index: 2; }
+.ini10-timeline .ini10-tl-item::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 1px; background: var(--borda); }
+.ini10-timeline .ini10-tl-item:first-child::before { top: 50%; }
+.ini10-timeline .ini10-tl-item:last-child::before { bottom: 50%; }
+.ini10-tl-data { flex-shrink: 0; width: 56px; font-size: 11.5px; font-weight: 700; color: var(--texto-suave); }
+.ini10-tl-info { flex: 1; min-width: 0; background: var(--cartao); border: 1px solid var(--borda); border-radius: 10px; padding: 9px 12px; }
+.ini10-tl-info strong { font-size: 13.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ini10-tl-info small { font-size: 11.5px; color: var(--texto-suave); }
+.ini10-sit-atrasado.ini10-tl-marca { background: var(--vermelho); box-shadow: 0 0 0 2px var(--vermelho); }
+.ini10-sit-atrasado.ini10-tl-data { color: var(--vermelho); }
+.ini10-sit-hoje.ini10-tl-marca { background: var(--laranja); box-shadow: 0 0 0 2px var(--laranja); }
+.ini10-sit-hoje.ini10-tl-data { color: var(--laranja); }
+.ini10-vazio { background: var(--cartao); border: 1px dashed var(--borda); border-radius: 12px; padding: 18px; text-align: center; color: var(--texto-suave); font-size: 13px; }
+
+/* ── Bento: refinamentos em telas largas ──────────────────── */
+@media (min-width: 760px) {
+  .ini9-fat { grid-column: span 4; }
+  .ini9-acao { grid-column: span 2; }
+  .ini9-chart { grid-column: span 3; }
+  .ini9-top { grid-column: span 3; }
+  .ini7-kpis { grid-template-columns: repeat(4, 1fr); }
+}

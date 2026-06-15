@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2E7D32">
+  <script>try{document.documentElement.dataset.tema=localStorage.getItem("vivassol.v2.tema")==="escuro"?"escuro":"claro";}catch(e){}</script>
   <meta name="description" content="Vivassol Gerencial - Sistema de gestão de vendas, estoque e clientes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,7 +13,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="images/icone.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="images/icone.svg">
-  <link rel="stylesheet" href="css/styles.css?v=20260615h">
+  <link rel="stylesheet" href="css/styles.css?v=20260616a">
 </head>
 <body>
 
@@ -40,6 +41,7 @@
       <header id="topo">
         <div class="topo-marca"><img src="images/icone.svg" alt=""></div>
         <h2 id="topo-titulo"></h2>
+        <button id="botao-tema" class="botao-tema" type="button" title="Alternar tema claro/escuro" aria-label="Alternar tema"></button>
         <button id="botao-status" class="status" type="button" title="Estado da sincronização">
           <span class="ponto"></span><span id="status-texto">—</span>
         </button>
@@ -51,17 +53,17 @@
 
   <div id="area-toasts"></div>
 
-  <script src="js/config.js?v=20260615h"></script>
-  <script src="js/core.js?v=20260615h"></script>
-  <script src="js/inicio.js?v=20260615h"></script>
-  <script src="js/vendas.js?v=20260615h"></script>
-  <script src="js/fluxo.js?v=20260615h"></script>
-  <script src="js/estoque.js?v=20260615h"></script>
-  <script src="js/clientes.js?v=20260615h"></script>
-  <script src="js/produtos.js?v=20260615h"></script>
-  <script src="js/caixa.js?v=20260615h"></script>
-  <script src="js/cobrancas.js?v=20260615h"></script>
-  <script src="js/configuracoes.js?v=20260615h"></script>
-  <script src="js/inicio-layouts.js?v=20260615h"></script>
+  <script src="js/config.js?v=20260616a"></script>
+  <script src="js/core.js?v=20260616a"></script>
+  <script src="js/inicio.js?v=20260616a"></script>
+  <script src="js/vendas.js?v=20260616a"></script>
+  <script src="js/fluxo.js?v=20260616a"></script>
+  <script src="js/estoque.js?v=20260616a"></script>
+  <script src="js/clientes.js?v=20260616a"></script>
+  <script src="js/produtos.js?v=20260616a"></script>
+  <script src="js/caixa.js?v=20260616a"></script>
+  <script src="js/cobrancas.js?v=20260616a"></script>
+  <script src="js/configuracoes.js?v=20260616a"></script>
+  <script src="js/inicio-layouts.js?v=20260616a"></script>
 </body>
 </html>

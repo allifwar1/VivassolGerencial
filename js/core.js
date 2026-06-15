@@ -181,6 +181,32 @@ function toast(mensagem, tipo = "ok") {
   }, 3200);
 }
 
+/* ---------------- tema (claro / escuro) ---------------- */
+
+const CHAVE_TEMA = "vivassol.v2.tema";
+
+function temaSalvo() {
+  try { return localStorage.getItem(CHAVE_TEMA) === "escuro" ? "escuro" : "claro"; }
+  catch { return "claro"; }
+}
+
+function aplicarTema(tema) {
+  const t = tema === "escuro" ? "escuro" : "claro";
+  document.documentElement.dataset.tema = t;
+  try { localStorage.setItem(CHAVE_TEMA, t); } catch { /* ignora */ }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", t === "escuro" ? "#13171a" : "#2E7D32");
+  const btn = document.getElementById("botao-tema");
+  if (btn) {
+    btn.innerHTML = t === "escuro" ? ICONES.sol : ICONES.lua;
+    btn.setAttribute("aria-label", t === "escuro" ? "Mudar para tema claro" : "Mudar para tema escuro");
+  }
+}
+
+function alternarTema() {
+  aplicarTema(temaSalvo() === "escuro" ? "claro" : "escuro");
+}
+
 /* ---------------- ícones (SVG embutido) ---------------- */
 
 function icone(caminho) {
@@ -201,6 +227,8 @@ const ICONES = {
   config: icone('<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/>'),
   mais: icone('<circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>'),
   sair: icone('<path d="M9 4H4v16h5"/><path d="M16 8l4 4-4 4"/><path d="M9 12h11"/>'),
+  sol: icone('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  lua: icone('<path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8z"/>'),
 };
 
 /* ---------------- banco local ---------------- */
@@ -1317,8 +1345,10 @@ async function sair() {
 function iniciar() {
   carregarDbLocal();
   carregarPendentesLocal();
+  aplicarTema(temaSalvo());
   $("#form-login").addEventListener("submit", aoEnviarLogin);
   $("#botao-status").addEventListener("click", abrirDetalhesStatus);
+  $("#botao-tema")?.addEventListener("click", alternarTema);
   window.addEventListener("online", () => sincronizar());
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) sincronizar();
