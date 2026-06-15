@@ -457,7 +457,11 @@ function iniciarArrasto(e, card, board, aoSoltar) {
     ghost.style.left = (ev.clientX - offsetX) + "px";
     ghost.style.top = (ev.clientY - offsetY) + "px";
     const sob = document.elementFromPoint(ev.clientX, ev.clientY);
-    const corpo = sob && sob.closest(".coluna-corpo");
+    let corpo = sob && sob.closest(".coluna-corpo");
+    if (!corpo) {
+      const coluna = sob && sob.closest(".coluna-fluxo");
+      if (coluna) corpo = coluna.querySelector(".coluna-corpo");
+    }
     if (corpo) {
       colunaAlvo = corpo.closest(".coluna-fluxo");
       const cardSob = sob.closest(".card-fluxo");
