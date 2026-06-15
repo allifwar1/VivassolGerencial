@@ -10,8 +10,8 @@
 
 registrarModulo({
   id: "estoque",
-  titulo: "Estoque",
-  rotulo: "Estoque",
+  titulo: "Insumos",
+  rotulo: "Insumos",
   icone: "estoque",
   render(el) {
     renderListaInsumos(el);
@@ -207,7 +207,7 @@ function renderConferencia(el) {
   el.innerHTML = `
     <div class="pagina com-barra-fixa">
       <div class="pdv-topo">
-        <button type="button" class="btn btn-secundario" id="conf-voltar">‹ Estoque</button>
+        <button type="button" class="btn btn-secundario" id="conf-voltar">‹ Insumos</button>
         <strong>Conferência</strong>
       </div>
       <p class="pdv-dica">Conte os itens e digite a quantidade encontrada. Itens em branco não são alterados.</p>
