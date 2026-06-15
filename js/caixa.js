@@ -130,7 +130,8 @@ function renderResumo(cont, refresh) {
       <div class="cartao-stat"><small>Entradas no mês</small><strong class="verde">${dinheiro(ent(mes.ini, mes.fim))}</strong></div>
       <div class="cartao-stat"><small>Saídas no mês</small><strong class="vermelho">${dinheiro(sai(mes.ini, mes.fim))}</strong></div>
     </div>
-    <p class="caixa-dica">As vendas à vista entram automaticamente no caixa. Os recebimentos de vendas a prazo entram pela tela de Cobranças.</p>`;
+    <p class="caixa-dica">As vendas à vista entram automaticamente no caixa. Os recebimentos de vendas a prazo entram pela tela de Cobranças.</p>
+    ${saldoInicialTotal() > 0.005 ? `<p class="caixa-dica">Inclui um saldo inicial de ${dinheiro(saldoInicialTotal())} acumulado de períodos já arquivados.</p>` : ""}`;
 
   $("#caixa-nova-saida", cont).addEventListener("click", () => abrirNovaSaida(refresh));
   $("#caixa-mais", cont).addEventListener("click", () => abrirMenuCaixa(refresh));

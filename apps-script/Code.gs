@@ -47,6 +47,14 @@ const ABAS = {
 // Abas que o site lê e grava (painel_BD é só informativa).
 const ABAS_DE_DADOS = ["configuracoes", "usuarios", "clientes", "produtos", "insumos", "vendas", "pagamentos", "lancamentos"];
 
+// Abas de ARQUIVO: para onde vão os dados antigos já finalizados, mantendo
+// as abas "ativas" pequenas para o app continuar rápido. NÃO são lidas pelo
+// site (não entram em ABAS_DE_DADOS) — servem só de histórico consultável.
+// Têm exatamente as mesmas colunas das abas originais.
+ABAS.vendas_arquivo = ABAS.vendas;
+ABAS.pagamentos_arquivo = ABAS.pagamentos;
+ABAS.lancamentos_arquivo = ABAS.lancamentos;
+
 /* ---------------- instalação ---------------- */
 
 function configurarPlanilha() {
@@ -122,6 +130,12 @@ function doPost(e) {
       return resposta({ ok: true, dados: { tabela: tabela, linhas: quantidade } });
     }
 
+    if (corpo.acao === "arquivarAntigos") {
+      var meses = Number(corpo.payload && corpo.payload.meses) || 12;
+      if (meses < 1) meses = 1;
+      return resposta({ ok: true, dados: arquivarAntigos(meses) });
+    }
+
     return resposta({ ok: false, erro: "Ação desconhecida: " + corpo.acao });
   } catch (erro) {
     return resposta({ ok: false, erro: String(erro) });
@@ -164,40 +178,179 @@ function salvarTabela(nome, linhas) {
   const trava = LockService.getScriptLock();
   trava.waitLock(15000);
   try {
-    const planilha = SpreadsheetApp.getActive();
-    let aba = planilha.getSheetByName(nome);
-    if (!aba) aba = planilha.insertSheet(nome);
-    const cabecalho = ABAS[nome];
-
-    // Garante que a linha de cabeçalho tenha TODAS as colunas atuais
-    // (inclusive as novas de pedido/fluxo). Sem isso, os dados gravados em
-    // colunas sem cabeçalho não voltam na leitura — e o status muda no
-    // aparelho mas "não atualiza" na planilha. Conserta-se sozinho, sem
-    // precisar reexecutar configurarPlanilha.
-    garantirCabecalho(aba, cabecalho);
-
-    // Limpa os dados antigos (mantém o cabeçalho).
-    const ultimaLinha = aba.getLastRow();
-    if (ultimaLinha > 1) {
-      aba.getRange(2, 1, ultimaLinha - 1, Math.max(cabecalho.length, aba.getLastColumn())).clearContent();
-    }
-
-    // Grava as linhas novas na ordem das colunas do cabeçalho.
-    if (linhas.length) {
-      const matriz = linhas.map(function (objeto) {
-        return cabecalho.map(function (coluna) {
-          const valor = objeto[coluna];
-          return valor === undefined || valor === null ? "" : valor;
-        });
-      });
-      aba.getRange(2, 1, matriz.length, cabecalho.length).setValues(matriz);
-    }
-
-    atualizarPainel(planilha);
-    return linhas.length;
+    return escreverTabela_(SpreadsheetApp.getActive(), nome, linhas);
   } finally {
     trava.releaseLock();
   }
+}
+
+/* Reescreve uma aba inteira (cabeçalho + linhas). NÃO adquire trava — quem
+   chamar precisa já estar dentro de uma trava (salvarTabela e arquivarAntigos). */
+function escreverTabela_(planilha, nome, linhas) {
+  let aba = planilha.getSheetByName(nome);
+  if (!aba) aba = planilha.insertSheet(nome);
+  const cabecalho = ABAS[nome];
+
+  // Garante que a linha de cabeçalho tenha TODAS as colunas atuais
+  // (inclusive as novas de pedido/fluxo). Sem isso, os dados gravados em
+  // colunas sem cabeçalho não voltam na leitura — e o status muda no
+  // aparelho mas "não atualiza" na planilha. Conserta-se sozinho, sem
+  // precisar reexecutar configurarPlanilha.
+  garantirCabecalho(aba, cabecalho);
+
+  // Limpa os dados antigos (mantém o cabeçalho).
+  const ultimaLinha = aba.getLastRow();
+  if (ultimaLinha > 1) {
+    aba.getRange(2, 1, ultimaLinha - 1, Math.max(cabecalho.length, aba.getLastColumn())).clearContent();
+  }
+
+  // Grava as linhas novas na ordem das colunas do cabeçalho.
+  if (linhas.length) {
+    const matriz = linhas.map(function (objeto) {
+      return cabecalho.map(function (coluna) {
+        const valor = objeto[coluna];
+        return valor === undefined || valor === null ? "" : valor;
+      });
+    });
+    aba.getRange(2, 1, matriz.length, cabecalho.length).setValues(matriz);
+  }
+
+  atualizarPainel(planilha);
+  return linhas.length;
+}
+
+/* ============================================================
+   ARQUIVAMENTO DE DADOS ANTIGOS (janela deslizante)
+   Move para abas *_arquivo:
+   - lançamentos com data anterior ao corte (o saldo líquido deles é
+     somado ao "saldo inicial" em configuracoes, preservando o caixa);
+   - vendas já FINALIZADAS (Entregue+Pago ou Cancelado) e sem movimento
+     recente, junto com seus pagamentos.
+   Nada é apagado: tudo continua consultável nas abas de arquivo.
+   ============================================================ */
+
+function arquivarAntigos(meses) {
+  const trava = LockService.getScriptLock();
+  trava.waitLock(30000);
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const corte = dataCorte_(meses); // "YYYY-MM-DD"
+
+    // ---------- LANÇAMENTOS ----------
+    const lancs = lerTabela(ss, "lancamentos");
+    const lancAntigos = [], lancRecentes = [];
+    let addDin = 0, addBanco = 0;
+    lancs.forEach(function (l) {
+      if (diaDe_(l.data) && diaDe_(l.data) < corte) {
+        lancAntigos.push(l);
+        const ef = efeitoLanc_(l);
+        if (String(l.destino) === "banco") addBanco += ef; else addDin += ef;
+      } else {
+        lancRecentes.push(l);
+      }
+    });
+
+    // ---------- VENDAS + PAGAMENTOS ----------
+    const vendas = lerTabela(ss, "vendas");
+    const pagamentos = lerTabela(ss, "pagamentos");
+
+    const grupos = {};
+    vendas.forEach(function (v) {
+      const ch = v.id_venda || v.id;
+      (grupos[ch] = grupos[ch] || []).push(v);
+    });
+    const ultPag = {};
+    pagamentos.forEach(function (p) {
+      const d = diaDe_(p.data);
+      if (d && (!ultPag[p.id_venda] || d > ultPag[p.id_venda])) ultPag[p.id_venda] = d;
+    });
+
+    const arquivarVenda = {};
+    Object.keys(grupos).forEach(function (ch) {
+      const base = grupos[ch][0];
+      const sp = String(base.status_producao || "");
+      const spg = String(base.status_pagamento || "");
+      const resolvido = (sp === "Cancelado") || (sp === "Entregue" && spg === "Pago");
+      if (!resolvido) return;
+      let maxData = "";
+      grupos[ch].forEach(function (r) { const d = diaDe_(r.data); if (d > maxData) maxData = d; });
+      if (ultPag[ch] && ultPag[ch] > maxData) maxData = ultPag[ch];
+      if (maxData && maxData < corte) arquivarVenda[ch] = true;
+    });
+
+    const vendasAntigas = [], vendasRecentes = [];
+    vendas.forEach(function (v) {
+      if (arquivarVenda[v.id_venda || v.id]) vendasAntigas.push(v); else vendasRecentes.push(v);
+    });
+    const pagAntigos = [], pagRecentes = [];
+    pagamentos.forEach(function (p) {
+      if (arquivarVenda[p.id_venda]) pagAntigos.push(p); else pagRecentes.push(p);
+    });
+
+    // ---------- Grava arquivos (anexa ao que já existir) ----------
+    if (lancAntigos.length) anexarArquivo_(ss, "lancamentos_arquivo", lancAntigos);
+    if (vendasAntigas.length) anexarArquivo_(ss, "vendas_arquivo", vendasAntigas);
+    if (pagAntigos.length) anexarArquivo_(ss, "pagamentos_arquivo", pagAntigos);
+
+    // ---------- Atualiza saldo inicial + carimbo em configuracoes ----------
+    const cfg = lerTabela(ss, "configuracoes");
+    if (addDin !== 0) setConfig_(cfg, "saldo_inicial_dinheiro", arred2_((Number(lerConfig_(cfg, "saldo_inicial_dinheiro")) || 0) + addDin));
+    if (addBanco !== 0) setConfig_(cfg, "saldo_inicial_banco", arred2_((Number(lerConfig_(cfg, "saldo_inicial_banco")) || 0) + addBanco));
+    setConfig_(cfg, "ultimo_arquivamento", new Date().toISOString());
+    escreverTabela_(ss, "configuracoes", cfg);
+
+    // ---------- Reescreve as abas ativas sem os antigos ----------
+    if (lancAntigos.length) escreverTabela_(ss, "lancamentos", lancRecentes);
+    if (vendasAntigas.length) escreverTabela_(ss, "vendas", vendasRecentes);
+    if (pagAntigos.length) escreverTabela_(ss, "pagamentos", pagRecentes);
+
+    return { vendas: vendasAntigas.length, pagamentos: pagAntigos.length, lancamentos: lancAntigos.length };
+  } finally {
+    trava.releaseLock();
+  }
+}
+
+/* Anexa linhas ao final de uma aba de arquivo (sem apagar o que já tem). */
+function anexarArquivo_(ss, nome, linhas) {
+  let aba = ss.getSheetByName(nome);
+  if (!aba) aba = ss.insertSheet(nome);
+  const cabecalho = ABAS[nome];
+  garantirCabecalho(aba, cabecalho);
+  const inicio = Math.max(aba.getLastRow(), 1) + 1;
+  const matriz = linhas.map(function (objeto) {
+    return cabecalho.map(function (coluna) {
+      const valor = objeto[coluna];
+      return valor === undefined || valor === null ? "" : valor;
+    });
+  });
+  aba.getRange(inicio, 1, matriz.length, cabecalho.length).setValues(matriz);
+}
+
+/* Efeito de um lançamento no saldo (igual ao app): entrada soma, saída
+   subtrai, ajuste usa o próprio sinal. */
+function efeitoLanc_(l) {
+  const v = Number(l.valor) || 0;
+  if (String(l.tipo) === "saida") return -Math.abs(v);
+  if (String(l.tipo) === "ajuste") return v;
+  return Math.abs(v);
+}
+
+function dataCorte_(meses) {
+  const d = new Date();
+  d.setMonth(d.getMonth() - meses);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function diaDe_(valor) { return String(valor || "").slice(0, 10); }
+function arred2_(n) { return Math.round(n * 100) / 100; }
+
+function lerConfig_(cfg, chave) {
+  for (let i = 0; i < cfg.length; i++) if (cfg[i].chave === chave) return cfg[i].valor;
+  return "";
+}
+function setConfig_(cfg, chave, valor) {
+  for (let i = 0; i < cfg.length; i++) if (cfg[i].chave === chave) { cfg[i].valor = valor; return; }
+  cfg.push({ chave: chave, valor: valor });
 }
 
 /* Garante que a linha 1 da aba tenha exatamente as colunas esperadas,
@@ -234,6 +387,11 @@ function atualizarPainel(planilha) {
     const abaDados = planilha.getSheetByName(nome);
     const registros = abaDados ? Math.max(abaDados.getLastRow() - 1, 0) : 0;
     linhas.push(["registros_" + nome, registros]);
+  });
+  // Quantos registros estão guardados nas abas de arquivo (histórico antigo).
+  ["vendas_arquivo", "pagamentos_arquivo", "lancamentos_arquivo"].forEach(function (nome) {
+    const abaArq = planilha.getSheetByName(nome);
+    if (abaArq) linhas.push(["arquivados_" + nome, Math.max(abaArq.getLastRow() - 1, 0)]);
   });
   const ultimaLinha = aba.getLastRow();
   if (ultimaLinha > 1) aba.getRange(2, 1, ultimaLinha - 1, 2).clearContent();

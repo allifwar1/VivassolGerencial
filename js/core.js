@@ -141,6 +141,21 @@ function parseComposicao(str, insumos) {
   });
 }
 
+/* ---------------- configurações (tabela chave/valor) ---------------- */
+
+function obterConfig(chave, padrao) {
+  const c = (App.db.configuracoes || []).find((c) => c.chave === chave);
+  return c && c.valor !== "" && c.valor != null ? c.valor : padrao;
+}
+
+function definirConfig(chave, valor) {
+  const arr = App.db.configuracoes || (App.db.configuracoes = []);
+  const i = arr.findIndex((c) => c.chave === chave);
+  if (i >= 0) arr[i].valor = valor;
+  else arr.push({ chave, valor });
+  salvarTabela("configuracoes");
+}
+
 function ehAtivo(registro) {
   const v = registro?.ativo;
   return !(v === false || v === 0 || String(v).toLowerCase() === "false" || String(v).toLowerCase() === "não");
@@ -927,8 +942,19 @@ function efeitoLancamento(l) {
   return Math.abs(numero(l.valor)); // entrada
 }
 
+/* Saldo inicial de um destino: o líquido dos lançamentos já arquivados
+   (períodos antigos movidos para fora das abas ativas). Mantém o caixa
+   correto mesmo depois do arquivamento. */
+function saldoInicialDe(destino) {
+  return numero(obterConfig(destino === "banco" ? "saldo_inicial_banco" : "saldo_inicial_dinheiro", 0));
+}
+
+function saldoInicialTotal() {
+  return saldoInicialDe("dinheiro") + saldoInicialDe("banco");
+}
+
 function saldoDestino(destino) {
-  return (App.db.lancamentos || [])
+  return saldoInicialDe(destino) + (App.db.lancamentos || [])
     .filter((l) => l.destino === destino)
     .reduce((s, l) => s + efeitoLancamento(l), 0);
 }
@@ -966,6 +992,72 @@ function registrarDevolucaoVenda(idVenda) {
   });
   if (criou) salvarTabela("lancamentos");
   return criou;
+}
+
+/* ============================================================
+   ARQUIVAMENTO (janela deslizante) — lado do app
+   O usuário escolhe quantos meses manter ativos. Os pedidos antigos
+   já finalizados e os lançamentos antigos são MOVIDOS (no servidor)
+   para abas de arquivo; o saldo do caixa é preservado por um "saldo
+   inicial". Nada é apagado.
+   ============================================================ */
+
+function janelaMeses() {
+  const n = parseInt(obterConfig("janela_meses", 12), 10);
+  return isFinite(n) && n >= 1 ? n : 12;
+}
+
+function dataCorteISO(meses) {
+  const d = new Date();
+  d.setMonth(d.getMonth() - meses);
+  return d.toISOString().slice(0, 10);
+}
+
+/* Conta (a partir dos dados já carregados) quantos registros seriam
+   arquivados com a janela atual. Espelha exatamente a lógica do servidor. */
+function contarArquivaveis(meses) {
+  const corte = dataCorteISO(meses);
+  const dia = (v) => String(v || "").slice(0, 10);
+
+  const lancamentos = (App.db.lancamentos || [])
+    .filter((l) => dia(l.data) && dia(l.data) < corte).length;
+
+  let vendas = 0, pagamentos = 0;
+  agruparVendas(App.db.vendas).forEach((v) => {
+    const resolvido = v.status_producao === "Cancelado" ||
+      (v.status_producao === "Entregue" && v.status_pagamento === "Pago");
+    if (!resolvido) return;
+    let maxData = "";
+    v.itens.forEach((it) => { const d = dia(it.data); if (d > maxData) maxData = d; });
+    const pags = pagamentosDaVenda(v.id_venda);
+    pags.forEach((p) => { const d = dia(p.data); if (d > maxData) maxData = d; });
+    if (maxData && maxData < corte) {
+      vendas += v.itens.length;
+      pagamentos += pags.length;
+    }
+  });
+  return { vendas, pagamentos, lancamentos };
+}
+
+/* Dispara o arquivamento no servidor e re-sincroniza. Exige que não haja
+   nada pendente de envio (para não perder alterações locais). */
+async function arquivarAgora(meses) {
+  if (!apiConfigurada()) { toast("Conecte a planilha primeiro.", "erro"); return false; }
+  if (App.tabelasPendentes.size > 0) {
+    await sincronizar({ forcar: true });
+    if (App.tabelasPendentes.size > 0) {
+      toast("Há dados ainda não sincronizados. Tente de novo em instantes.", "erro");
+      return false;
+    }
+  }
+  try {
+    const resultado = await chamarApi("arquivarAntigos", { meses });
+    await sincronizar({ forcar: true });
+    return resultado;
+  } catch (e) {
+    toast("Falha ao arquivar: " + e.message, "erro");
+    return false;
+  }
 }
 
 /* ---------------- navegação ---------------- */
