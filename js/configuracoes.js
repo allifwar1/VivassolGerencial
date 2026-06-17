@@ -65,6 +65,17 @@ registrarModulo({
             <div class="linha"><span class="suave">Sincronização automática</span><span>a cada ${syncSeg}s</span></div>
           </div>
         </div>
+
+        <div class="bloco">
+          <h3 class="titulo-secao" style="margin:0">Manutenção do app</h3>
+          <p class="suave" style="font-size:13px;line-height:1.5">
+            Se uma atualização não apareceu no celular, use este botão para limpar o
+            cache e recarregar o app do zero. <strong>Os seus dados não são apagados.</strong>
+          </p>
+          <div class="linha-acoes">
+            <button type="button" class="btn btn-secundario" id="cfg-limpar-cache">Limpar cache e recarregar</button>
+          </div>
+        </div>
       </div>`;
 
     $("#config-testar", el)?.addEventListener("click", async () => {
@@ -94,6 +105,7 @@ registrarModulo({
     });
 
     $("#cfg-gerenciar-arquivo", el)?.addEventListener("click", () => abrirGerenciarArquivo());
+    $("#cfg-limpar-cache", el)?.addEventListener("click", () => limparCacheApp());
   },
 });
 
@@ -310,4 +322,21 @@ async function carregarRestauracao(corpo, modal) {
     modal.fechar();
     renderizarRotaAtual();
   });
+}
+
+/* ---------------- limpar cache do PWA ---------------- */
+
+async function limparCacheApp() {
+  toast("Limpando cache…");
+  try {
+    if ("caches" in window) {
+      const chaves = await caches.keys();
+      await Promise.all(chaves.map((k) => caches.delete(k)));
+    }
+    if ("serviceWorker" in navigator) {
+      const registros = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registros.map((r) => r.unregister()));
+    }
+  } catch (_) { /* ignora se o browser não suportar */ }
+  window.location.reload(true);
 }
