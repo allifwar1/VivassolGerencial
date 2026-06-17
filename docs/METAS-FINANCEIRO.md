@@ -4,6 +4,16 @@
 > financeiro ficar completo. Não é código — é o combinado do que será construído,
 > em ordem de prioridade. Atualizar conforme cada etapa for entregue.
 
+## Antes de implementar
+
+- [ ] Conversar com a Karen sobre as mudanças de rotina antes de ativar qualquer
+      integração nova — especialmente a conferência do Mercado Pago e os marketplaces,
+      que vão mudar o fluxo de trabalho dela no dia a dia.
+- [ ] Gerar o Access Token de produção no painel de desenvolvedores do Mercado Pago
+      e guardá-lo em local seguro (não enviar por WhatsApp/e-mail).
+
+---
+
 ## Visão geral
 
 A Vivassol vai **concentrar todo o dinheiro digital na conta do Mercado Pago**.
