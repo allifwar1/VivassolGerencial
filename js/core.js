@@ -1349,6 +1349,10 @@ function iniciar() {
   $("#form-login").addEventListener("submit", aoEnviarLogin);
   $("#botao-status").addEventListener("click", abrirDetalhesStatus);
   $("#botao-tema")?.addEventListener("click", alternarTema);
+  if (CONFIG.linkPlanilha) {
+    const btnPlanilha = $("#botao-planilha");
+    if (btnPlanilha) { btnPlanilha.href = CONFIG.linkPlanilha; btnPlanilha.classList.remove("oculto"); }
+  }
   window.addEventListener("online", () => sincronizar());
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) sincronizar();
