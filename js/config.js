@@ -19,7 +19,7 @@ const CONFIG = {
   token: "viva2_a47f19c3e8b2d5061f9c3a7e4d8b2f60c1a5e937",
 
   // Link da planilha (opcional, aparece em Configurações):
-  linkPlanilha: "",
+  linkPlanilha: "https://docs.google.com/spreadsheets/d/103xJ7FgqBWqOABmZZfTaYbsJdgdNcgW8YW6j8cLdtgY/edit?usp=drivesdk",
 
   // Sincronização automática em segundo plano (em milissegundos):
   intervaloSyncMs: 60000,
