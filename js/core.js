@@ -407,10 +407,12 @@ async function sincronizar(opcoes = {}) {
     // 1) Envia primeiro o que está pendente neste aparelho. Uma tabela que
     //    falhar (ex.: aba ainda não existe na planilha) fica pendente, mas
     //    não impede o envio das outras nem a leitura abaixo.
+    const tabelasEnviadasAgora = new Set();
     for (const tabela of [...App.tabelasPendentes]) {
       try {
         await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
         App.tabelasPendentes.delete(tabela);
+        tabelasEnviadasAgora.add(tabela);
         salvarPendentesLocal();
       } catch (e) {
         console.warn("Falha ao enviar a tabela (segue pendente):", tabela, e);
@@ -436,8 +438,12 @@ async function sincronizar(opcoes = {}) {
     );
 
     TABELAS.forEach((t) => {
-      // Tabela com alteração local pendente nunca é sobrescrita.
-      if (Array.isArray(dados[t]) && !App.tabelasPendentes.has(t)) App.db[t] = dados[t];
+      // Tabela ainda pendente OU recém-enviada neste ciclo nunca é sobrescrita:
+      // o dado local é o mais recente — qualquer leitura imediata do servidor
+      // pode devolver versão desatualizada (race condition de propagação).
+      if (Array.isArray(dados[t]) && !App.tabelasPendentes.has(t) && !tabelasEnviadasAgora.has(t)) {
+        App.db[t] = dados[t];
+      }
     });
 
     // Restaura campos de pedido que a planilha não devolveu (cabeçalho antigo).
@@ -770,7 +776,12 @@ async function mudarStatusProducao(idVenda, novoStatus, opcoes = {}) {
   }
 
   if (devolver) registrarDevolucaoVenda(idVenda);
-  if (ajustarEstoquePorTransicao(venda, atual, novoStatus)) salvarTabela("insumos");
+  // Guarda de segurança extra: re-lê o status do banco local imediatamente antes
+  // de ajustar o estoque, pra garantir que um sync concorrente não fez a transição
+  // já acontecer (evita duplo revert de estoque em condição de corrida).
+  const vendaAtual = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
+  if (!vendaAtual || vendaAtual.status_producao === novoStatus) return false;
+  if (ajustarEstoquePorTransicao(vendaAtual, vendaAtual.status_producao, novoStatus)) salvarTabela("insumos");
 
   const statusCompat = novoStatus === "Cancelado" ? "Cancelada"
     : novoStatus === "Entregue" ? "Concluída" : "Pendente";
