@@ -22,7 +22,7 @@ const CONFIG = {
   linkPlanilha: "https://docs.google.com/spreadsheets/d/103xJ7FgqBWqOABmZZfTaYbsJdgdNcgW8YW6j8cLdtgY/edit?usp=drivesdk",
 
   // Sincronização automática em segundo plano (em milissegundos):
-  intervaloSyncMs: 60000,
+  intervaloSyncMs: 120000,
 
   formasPagamento: ["Dinheiro", "Pix", "Cartão de débito", "Cartão de crédito", "Venda a prazo"],
   statusVenda: ["Concluída", "Pendente", "Cancelada"],

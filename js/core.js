@@ -447,7 +447,6 @@ async function enviarPendentes() {
     else { atualizarStatus("online"); logar("ok", "Tudo enviado para a planilha."); }
   } finally {
     App.syncOcupado = false;
-    flushLogPlanilha();
   }
 }
 
@@ -516,7 +515,7 @@ function migrarIds() {
 async function sincronizar(opcoes = {}) {
   if (!apiConfigurada()) { atualizarStatus("sem-config"); return false; }
   if (App.syncOcupado) {
-    logar("info", "Sincronização ignorada: já existe uma em andamento.");
+    if (opcoes.forcar) logar("info", "Já existe uma sincronização em andamento. Aguarde.");
     return false;
   }
   if (!opcoes.forcar && estaEditando()) return false;
@@ -631,7 +630,6 @@ async function sincronizar(opcoes = {}) {
     return false;
   } finally {
     App.syncOcupado = false;
-    flushLogPlanilha();
   }
 }
 
@@ -1356,9 +1354,22 @@ function intervaloSyncMs() {
   return CONFIG.intervaloSyncMs || 60000;
 }
 
+/* Agenda a próxima sincronização automática APÓS a anterior concluir.
+   Ao contrário de setInterval, o intervalo começa DEPOIS da conclusão,
+   então nunca há sobreposição nem o indicador fica amarelo continuamente. */
+function agendarProximaSync() {
+  if (App.timerSync !== null) return;
+  App.timerSync = setTimeout(async () => {
+    App.timerSync = null;
+    await sincronizar();
+    agendarProximaSync();
+  }, intervaloSyncMs());
+}
+
 function reiniciarTimerSync() {
-  clearInterval(App.timerSync);
-  App.timerSync = setInterval(() => sincronizar(), intervaloSyncMs());
+  clearTimeout(App.timerSync);
+  App.timerSync = null;
+  agendarProximaSync();
 }
 
 /* ---------------- navegação ---------------- */
@@ -1580,15 +1591,15 @@ function iniciar() {
   window.addEventListener("offline", () => { logar("erro", "Internet caiu (aviso do navegador)."); atualizarStatus("offline"); });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      logar("info", "App foi para segundo plano.");
-      flushLogPlanilha(true); // envia o log antes de o aparelho possivelmente suspender
+      flushLogPlanilha(true); // envia o log via beacon antes de o aparelho suspender
     } else {
-      logar("info", "App voltou ao primeiro plano. Sincronizando…");
+      logar("info", "App voltou ao primeiro plano.");
       sincronizar();
     }
   });
-  // Última tentativa de salvar o log ao fechar a aba/app.
   window.addEventListener("pagehide", () => { logar("info", "App fechado."); flushLogPlanilha(true); });
+  // Envia logs acumulados para a planilha a cada 5 minutos (best-effort, não bloqueia nada).
+  setInterval(() => flushLogPlanilha(), 5 * 60 * 1000);
 
   let sessao = null;
   try { sessao = JSON.parse(localStorage.getItem(CHAVE_SESSAO) || "null"); } catch { /* ignora */ }
