@@ -22,9 +22,16 @@ const App = {
   editando: false,        // true durante PDV / conferência / telas de digitação
   syncOcupado: false,
   estadoConexao: "sem-config",
+  estadoDetalhe: "",      // texto curto do que está acontecendo agora
   ultimaSync: null,
   tabelasPendentes: new Set(),
   timerSync: null,
+  logSync: [],            // histórico de eventos desde que a página foi carregada
+  logBufferPlanilha: [],  // eventos ainda não enviados para a aba de log da planilha
+  logPlanilhaIndisponivel: false, // backend antigo sem a ação anexarLog
+  sessaoId: null,         // identifica esta aba/sessão no log da planilha
+  _logEl: null,           // terminal de log aberto (atualizado em tempo real)
+  _statusEl: null,        // linha de estado do terminal aberto
 };
 
 const CHAVE_DB = "vivassol.v2.db";
@@ -275,15 +282,117 @@ function apiConfigurada() {
   return /^https:\/\//.test(CONFIG.apiUrl || "");
 }
 
+// Tempo máximo (ms) que esperamos uma resposta do Apps Script antes de desistir.
+// Sem isso, um pedido travado deixava a sincronização presa em "Sincronizando…"
+// para sempre, mesmo com a internet funcionando.
+const TEMPO_LIMITE_API = 45000;
+
 async function chamarApi(acao, payload) {
-  // Corpo enviado como texto simples para evitar bloqueio de CORS no Apps Script.
-  const resposta = await fetch(CONFIG.apiUrl, {
-    method: "POST",
-    body: JSON.stringify({ token: CONFIG.token, acao, payload: payload || null }),
-  });
-  const json = await resposta.json();
-  if (!json.ok) throw new Error(json.erro || "Erro na planilha");
+  const controle = new AbortController();
+  const estouro = setTimeout(() => controle.abort(), TEMPO_LIMITE_API);
+  let resposta;
+  try {
+    // Corpo enviado como texto simples para evitar bloqueio de CORS no Apps Script.
+    resposta = await fetch(CONFIG.apiUrl, {
+      method: "POST",
+      body: JSON.stringify({ token: CONFIG.token, acao, payload: payload || null }),
+      signal: controle.signal,
+    });
+  } catch (e) {
+    // Falha de rede (sem internet, DNS, CORS) ou tempo esgotado (abort).
+    const err = new Error(
+      e.name === "AbortError"
+        ? `tempo esgotado (${Math.round(TEMPO_LIMITE_API / 1000)}s sem resposta)`
+        : "sem conexão com a internet"
+    );
+    err.rede = true;
+    throw err;
+  } finally {
+    clearTimeout(estouro);
+  }
+  let json;
+  try {
+    json = await resposta.json();
+  } catch (e) {
+    const err = new Error("resposta inválida da planilha");
+    err.rede = true;
+    throw err;
+  }
+  if (!json.ok) throw new Error(json.erro || "erro na planilha");
   return json.dados;
+}
+
+/* ---------------- log de sincronização (tempo real) ---------------- */
+
+const NIVEIS_LOG = {
+  info: { rotulo: "INFO", cor: "log-info" },
+  conexao: { rotulo: "CONEXÃO", cor: "log-conexao" },
+  envio: { rotulo: "ENVIO", cor: "log-envio" },
+  busca: { rotulo: "BUSCA", cor: "log-busca" },
+  ok: { rotulo: "OK", cor: "log-ok" },
+  erro: { rotulo: "ERRO", cor: "log-erro" },
+};
+
+/* Registra um evento: guarda no histórico da sessão, espelha no console, atualiza
+   o terminal aberto (se houver) e enfileira para a aba de log da planilha. */
+function logar(nivel, msg) {
+  const entrada = { ts: new Date(), nivel, msg };
+  App.logSync.push(entrada);
+  if (App.logSync.length > 600) App.logSync.shift();
+  App.logBufferPlanilha.push(entrada);
+  if (App.logBufferPlanilha.length > 200) App.logBufferPlanilha.shift();
+  try {
+    console.log(`[sync ${entrada.ts.toLocaleTimeString("pt-BR")}] ${nivel}: ${msg}`);
+  } catch { /* ignora */ }
+  if (App._logEl) {
+    App._logEl.appendChild(linhaLogEl(entrada));
+    App._logEl.scrollTop = App._logEl.scrollHeight;
+  }
+}
+
+function horaLog(d) {
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function linhaLogEl(entrada) {
+  const def = NIVEIS_LOG[entrada.nivel] || NIVEIS_LOG.info;
+  const linha = document.createElement("div");
+  linha.className = "log-linha " + def.cor;
+  linha.innerHTML = `<span class="log-hora">${esc(horaLog(entrada.ts))}</span>` +
+    `<span class="log-nivel">${esc(def.rotulo)}</span>` +
+    `<span class="log-msg">${esc(entrada.msg)}</span>`;
+  return linha;
+}
+
+/* Envia o histórico acumulado para a aba "log_sincronizacao" da planilha.
+   É best-effort: se a ação ainda não existir no Apps Script implantado, falha
+   em silêncio e NUNCA atrapalha a sincronização de verdade. */
+async function flushLogPlanilha(viaBeacon) {
+  if (!apiConfigurada() || App.logPlanilhaIndisponivel || App.logBufferPlanilha.length === 0) return;
+  const linhas = App.logBufferPlanilha.map((e) => ({
+    data_hora: e.ts.toISOString(),
+    nivel: e.nivel,
+    evento: e.msg,
+    usuario: App.usuario?.nome || "",
+    sessao: App.sessaoId || "",
+  }));
+  App.logBufferPlanilha = []; // limpa otimisticamente (log não é dado crítico)
+  const corpo = JSON.stringify({ token: CONFIG.token, acao: "anexarLog", payload: { linhas } });
+  if (viaBeacon && navigator.sendBeacon) {
+    try { navigator.sendBeacon(CONFIG.apiUrl, corpo); } catch { /* ignora */ }
+    return;
+  }
+  try {
+    await chamarApi("anexarLog", { linhas });
+  } catch (e) {
+    // Se a ação ainda não existe no Apps Script implantado, desliga o log da
+    // planilha por esta sessão (não fica tentando à toa). Erros de rede não
+    // desligam — voltam a tentar no próximo ciclo.
+    if (!e.rede && /a..o desconhecida/i.test(e.message)) {
+      App.logPlanilhaIndisponivel = true;
+      console.warn("Log da planilha indisponível (atualize o Apps Script).");
+    }
+  }
 }
 
 function estaEditando() {
@@ -316,22 +425,29 @@ function linhasParaEnvioDe(tabela) {
 async function enviarPendentes() {
   if (!apiConfigurada() || App.syncOcupado || App.tabelasPendentes.size === 0) return;
   App.syncOcupado = true;
-  atualizarStatus("sincronizando");
-  let algumaFalha = false;
+  let erroRede = false, erroServidor = false;
   try {
-    for (const tabela of [...App.tabelasPendentes]) {
+    const lista = [...App.tabelasPendentes];
+    logar("envio", `Enviando ${lista.length} tabela(s) alterada(s): ${lista.join(", ")}.`);
+    for (const tabela of lista) {
+      atualizarStatus("enviando", `Enviando "${tabela}"…`);
       try {
-        await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
+        const t0 = Date.now();
+        const r = await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
         App.tabelasPendentes.delete(tabela);
         salvarPendentesLocal();
+        logar("ok", `"${tabela}" enviada (${r?.linhas ?? "?"} linha(s), ${Date.now() - t0}ms).`);
       } catch (e) {
-        algumaFalha = true;
-        console.warn("Falha ao enviar a tabela (segue pendente):", tabela, e);
+        if (e.rede) erroRede = true; else erroServidor = true;
+        logar("erro", `Falha ao enviar "${tabela}": ${e.message}. Continua pendente.`);
       }
     }
-    atualizarStatus(algumaFalha ? "offline" : "online");
+    if (erroRede) atualizarStatus("offline");
+    else if (erroServidor) atualizarStatus("erro");
+    else { atualizarStatus("online"); logar("ok", "Tudo enviado para a planilha."); }
   } finally {
     App.syncOcupado = false;
+    flushLogPlanilha();
   }
 }
 
@@ -399,27 +515,47 @@ function migrarIds() {
 
 async function sincronizar(opcoes = {}) {
   if (!apiConfigurada()) { atualizarStatus("sem-config"); return false; }
-  if (App.syncOcupado) return false;
+  if (App.syncOcupado) {
+    logar("info", "Sincronização ignorada: já existe uma em andamento.");
+    return false;
+  }
   if (!opcoes.forcar && estaEditando()) return false;
   App.syncOcupado = true;
-  atualizarStatus("sincronizando");
+  const tInicio = Date.now();
+  atualizarStatus("conectando", "Conectando à planilha…");
+  logar("conexao", opcoes.forcar ? "Sincronização manual iniciada." : "Sincronização automática iniciada.");
+  let erroRede = false, erroServidor = false;
   try {
     // 1) Envia primeiro o que está pendente neste aparelho. Uma tabela que
     //    falhar (ex.: aba ainda não existe na planilha) fica pendente, mas
     //    não impede o envio das outras nem a leitura abaixo.
     const tabelasEnviadasAgora = new Set();
-    for (const tabela of [...App.tabelasPendentes]) {
+    const pendentesInicio = [...App.tabelasPendentes];
+    if (pendentesInicio.length) {
+      logar("envio", `Enviando ${pendentesInicio.length} tabela(s) alterada(s): ${pendentesInicio.join(", ")}.`);
+    }
+    for (const tabela of pendentesInicio) {
+      atualizarStatus("enviando", `Enviando "${tabela}"…`);
       try {
-        await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
+        const t0 = Date.now();
+        const r = await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
         App.tabelasPendentes.delete(tabela);
         tabelasEnviadasAgora.add(tabela);
         salvarPendentesLocal();
+        logar("ok", `"${tabela}" enviada (${r?.linhas ?? "?"} linha(s), ${Date.now() - t0}ms).`);
       } catch (e) {
-        console.warn("Falha ao enviar a tabela (segue pendente):", tabela, e);
+        if (e.rede) erroRede = true; else erroServidor = true;
+        logar("erro", `Falha ao enviar "${tabela}": ${e.message}. Continua pendente.`);
       }
     }
+    // Se já caiu a internet no envio, não tenta baixar — evita prender em "buscando".
+    if (erroRede) throw Object.assign(new Error("sem conexão durante o envio"), { rede: true });
     // 2) Baixa tudo da planilha.
+    atualizarStatus("buscando", "Buscando dados da planilha…");
+    logar("busca", "Baixando dados atualizados da planilha…");
+    const t0 = Date.now();
     const dados = await chamarApi("obterTudo");
+    logar("ok", `Dados recebidos da planilha (${Date.now() - t0}ms).`);
     const antes = JSON.stringify(App.db);
 
     // Preservar composicao local antes de qualquer overwrite pela planilha
@@ -470,54 +606,127 @@ async function sincronizar(opcoes = {}) {
       });
     }
     migrarIds();
-    if (JSON.stringify(App.db) !== antes) {
+    const mudou = JSON.stringify(App.db) !== antes;
+    if (mudou) {
       salvarDbLocal();
       if (!estaEditando() || opcoes.forcar) renderizarRotaAtual();
     }
     App.ultimaSync = new Date();
+    if (erroServidor) {
+      atualizarStatus("erro", "Erro em uma das tabelas");
+      logar("erro", `Sincronização concluída com erros do servidor (${Date.now() - tInicio}ms).`);
+      return false;
+    }
     atualizarStatus("online");
+    logar("ok", `Sincronização concluída em ${Date.now() - tInicio}ms${mudou ? " (dados atualizados)" : " (nada mudou)"}.`);
     return true;
   } catch (erro) {
-    console.warn("Falha na sincronização:", erro);
-    atualizarStatus("offline");
+    if (erro.rede) {
+      atualizarStatus("offline");
+      logar("erro", `Sincronização falhou: ${erro.message}. Tentará de novo no próximo ciclo.`);
+    } else {
+      atualizarStatus("erro", erro.message);
+      logar("erro", `Erro na sincronização: ${erro.message}.`);
+    }
     return false;
   } finally {
     App.syncOcupado = false;
+    flushLogPlanilha();
   }
 }
 
-function atualizarStatus(estado) {
+// "Família" visual de cada estado (controla a cor da bolinha via CSS).
+// Vários estados de trabalho compartilham a cor amarela "ocupado".
+const FAMILIA_ESTADO = {
+  online: "online",
+  offline: "offline",
+  erro: "erro",
+  "sem-config": "sem-config",
+  conectando: "ocupado",
+  enviando: "ocupado",
+  buscando: "ocupado",
+  sincronizando: "ocupado",
+};
+
+const TEXTO_ESTADO = {
+  online: "Conectado",
+  offline: "Sem conexão",
+  erro: "Erro",
+  "sem-config": "Não conectado",
+  conectando: "Conectando…",
+  enviando: "Enviando dados…",
+  buscando: "Buscando dados…",
+  sincronizando: "Sincronizando…",
+};
+
+function atualizarStatus(estado, detalhe) {
   App.estadoConexao = estado;
+  App.estadoDetalhe = detalhe || "";
   const botao = $("#botao-status");
   if (!botao) return;
-  const textos = {
-    online: "Conectado",
-    offline: "Sem conexão",
-    sincronizando: "Sincronizando…",
-    "sem-config": "Planilha não conectada",
-  };
-  botao.dataset.estado = estado;
-  $("#status-texto").textContent = textos[estado] || "—";
+  botao.dataset.estado = FAMILIA_ESTADO[estado] || "sem-config";
+  const texto = detalhe || TEXTO_ESTADO[estado] || "—";
+  $("#status-texto").textContent = texto;
+  botao.title = "Sincronização: " + (TEXTO_ESTADO[estado] || estado) + (detalhe ? " — " + detalhe : "");
+  // Atualiza o cabeçalho do terminal de log, se estiver aberto.
+  if (App._statusEl) App._statusEl.textContent = texto;
 }
 
 function abrirDetalhesStatus() {
   const pendentes = [...App.tabelasPendentes];
   const corpo = document.createElement("div");
   corpo.innerHTML = `
-    <div class="info-status">
-      <p><strong>Estado:</strong> ${esc($("#status-texto").textContent)}</p>
-      <p><strong>Última sincronização:</strong> ${App.ultimaSync ? dataHora(App.ultimaSync.toISOString()) : "ainda não sincronizou"}</p>
-      <p><strong>Aguardando envio:</strong> ${pendentes.length ? esc(pendentes.join(", ")) : "nada pendente"}</p>
+    <div class="status-painel">
+      <div class="status-linha">
+        <span class="status-rotulo">Estado agora</span>
+        <span class="status-valor" id="status-painel-estado">${esc(App.estadoDetalhe || TEXTO_ESTADO[App.estadoConexao] || "—")}</span>
+      </div>
+      <div class="status-linha">
+        <span class="status-rotulo">Última sincronização</span>
+        <span class="status-valor">${App.ultimaSync ? esc(dataHora(App.ultimaSync.toISOString())) : "ainda não"}</span>
+      </div>
+      <div class="status-linha">
+        <span class="status-rotulo">Aguardando envio</span>
+        <span class="status-valor">${pendentes.length ? esc(pendentes.join(", ")) : "nada pendente"}</span>
+      </div>
       ${apiConfigurada() ? "" : `<p class="erro">A URL do Apps Script ainda não foi colada em js/config.js. Os dados estão sendo salvos apenas neste aparelho.</p>`}
     </div>
-    <div class="linha-botoes">
+    <p class="status-legenda">Registro em tempo real desde que o app foi aberto:</p>
+    <div class="log-terminal" id="log-terminal"></div>
+    <div class="linha-acoes">
       <button type="button" class="btn btn-primario" id="status-sincronizar" ${apiConfigurada() ? "" : "disabled"}>Sincronizar agora</button>
+      <button type="button" class="btn btn-secundario" id="status-copiar">Copiar log</button>
     </div>`;
-  const modal = abrirModal("Sincronização", corpo, { classe: "modal-pequeno" });
+
+  const modal = abrirModal("Sincronização", corpo, {
+    classe: "modal-log",
+    aoFechar: () => { App._logEl = null; App._statusEl = null; },
+  });
+
+  // Liga o terminal ao log ao vivo: preenche o histórico e passa a receber
+  // novas linhas em tempo real (logar() escreve direto aqui).
+  const terminal = $("#log-terminal", corpo);
+  App.logSync.forEach((e) => terminal.appendChild(linhaLogEl(e)));
+  if (!App.logSync.length) {
+    const vazio = document.createElement("div");
+    vazio.className = "log-linha log-info";
+    vazio.innerHTML = `<span class="log-msg">Sem eventos ainda nesta sessão.</span>`;
+    terminal.appendChild(vazio);
+  }
+  terminal.scrollTop = terminal.scrollHeight;
+  App._logEl = terminal;
+  App._statusEl = $("#status-painel-estado", corpo);
+
   $("#status-sincronizar", corpo)?.addEventListener("click", async () => {
-    modal.fechar();
     const ok = await sincronizar({ forcar: true });
-    toast(ok ? "Sincronizado com a planilha." : "Não foi possível sincronizar.", ok ? "ok" : "erro");
+    if (!ok && App.estadoConexao === "offline") toast("Sem conexão. Veja o log.", "erro");
+  });
+  $("#status-copiar", corpo)?.addEventListener("click", () => {
+    const texto = App.logSync.map((e) =>
+      `${e.ts.toLocaleString("pt-BR")} [${(NIVEIS_LOG[e.nivel] || NIVEIS_LOG.info).rotulo}] ${e.msg}`
+    ).join("\n");
+    copiarTexto(texto);
+    toast("Log copiado.");
   });
 }
 
@@ -1339,7 +1548,8 @@ function entrar(cadastro) {
   $("#app").classList.remove("oculto");
   montarNavegacao();
   navegar("inicio");
-  atualizarStatus(apiConfigurada() ? "sincronizando" : "sem-config");
+  logar("conexao", `Sessão iniciada por ${cadastro.nome}. ${apiConfigurada() ? "Planilha conectada." : "Planilha NÃO conectada (só este aparelho)."}`);
+  atualizarStatus(apiConfigurada() ? "conectando" : "sem-config");
   sincronizar();
   reiniciarTimerSync();
 }
@@ -1354,9 +1564,11 @@ async function sair() {
 /* ---------------- inicialização ---------------- */
 
 function iniciar() {
+  App.sessaoId = uid("ses");
   carregarDbLocal();
   carregarPendentesLocal();
   aplicarTema(temaSalvo());
+  logar("info", `App aberto (sessão ${App.sessaoId}). Dados carregados deste aparelho.`);
   $("#form-login").addEventListener("submit", aoEnviarLogin);
   $("#botao-status").addEventListener("click", abrirDetalhesStatus);
   $("#botao-tema")?.addEventListener("click", alternarTema);
@@ -1364,10 +1576,19 @@ function iniciar() {
     const btnPlanilha = $("#botao-planilha");
     if (btnPlanilha) { btnPlanilha.href = CONFIG.linkPlanilha; btnPlanilha.classList.remove("oculto"); }
   }
-  window.addEventListener("online", () => sincronizar());
+  window.addEventListener("online", () => { logar("conexao", "Internet voltou. Sincronizando…"); sincronizar(); });
+  window.addEventListener("offline", () => { logar("erro", "Internet caiu (aviso do navegador)."); atualizarStatus("offline"); });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) sincronizar();
+    if (document.hidden) {
+      logar("info", "App foi para segundo plano.");
+      flushLogPlanilha(true); // envia o log antes de o aparelho possivelmente suspender
+    } else {
+      logar("info", "App voltou ao primeiro plano. Sincronizando…");
+      sincronizar();
+    }
   });
+  // Última tentativa de salvar o log ao fechar a aba/app.
+  window.addEventListener("pagehide", () => { logar("info", "App fechado."); flushLogPlanilha(true); });
 
   let sessao = null;
   try { sessao = JSON.parse(localStorage.getItem(CHAVE_SESSAO) || "null"); } catch { /* ignora */ }

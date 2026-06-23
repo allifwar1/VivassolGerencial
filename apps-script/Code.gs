@@ -42,6 +42,10 @@ const ABAS = {
   // Livro caixa: toda entrada/saída de dinheiro, separada por destino.
   lancamentos: ["id", "data", "tipo", "categoria", "descricao", "valor", "destino",
                 "id_referencia", "criado_por", "criado_em"],
+  // Diário de sincronização: histórico de tudo que o app fez ao conversar com a
+  // planilha (abriu, enviou, buscou, erros). NÃO entra em ABAS_DE_DADOS — o app
+  // só ESCREVE aqui (append), nunca baixa esta aba.
+  log_sincronizacao: ["data_hora", "nivel", "evento", "usuario", "sessao"],
 };
 
 // Abas que o site lê e grava (painel_BD é só informativa).
@@ -135,6 +139,11 @@ function doPost(e) {
       var meses = Number(corpo.payload && corpo.payload.meses) || 12;
       if (meses < 1) meses = 1;
       return resposta({ ok: true, dados: arquivarAntigos(meses) });
+    }
+
+    if (corpo.acao === "anexarLog") {
+      var linhasLog = (corpo.payload && corpo.payload.linhas) || [];
+      return resposta({ ok: true, dados: anexarLog_(linhasLog) });
     }
 
     if (corpo.acao === "resumoArquivo") {
@@ -495,6 +504,40 @@ function anexarArquivo_(ss, nome, linhas) {
     });
   });
   aba.getRange(inicio, 1, matriz.length, cabecalho.length).setValues(matriz);
+}
+
+/* Anexa linhas ao diário de sincronização (append-only, enxuto). É chamado com
+   muita frequência, então: trava curta (tryLock) para não atrasar — se não pegar
+   a trava, desiste sem erro (log não é dado crítico); e poda a aba para no máximo
+   MAX_LOG linhas, removendo as mais antigas. */
+function anexarLog_(linhas) {
+  if (!linhas || !linhas.length) return { gravados: 0 };
+  var trava = LockService.getScriptLock();
+  if (!trava.tryLock(4000)) return { gravados: 0, pulado: true };
+  try {
+    var ss = SpreadsheetApp.getActive();
+    var nome = "log_sincronizacao";
+    var aba = ss.getSheetByName(nome);
+    if (!aba) aba = ss.insertSheet(nome);
+    var cabecalho = ABAS.log_sincronizacao;
+    garantirCabecalho(aba, cabecalho);
+    var inicio = Math.max(aba.getLastRow(), 1) + 1;
+    var matriz = linhas.map(function (o) {
+      return cabecalho.map(function (c) {
+        var v = o[c];
+        return v === undefined || v === null ? "" : v;
+      });
+    });
+    aba.getRange(inicio, 1, matriz.length, cabecalho.length).setValues(matriz);
+
+    var MAX_LOG = 3000;
+    var total = aba.getLastRow() - 1;
+    if (total > MAX_LOG) aba.deleteRows(2, total - MAX_LOG);
+
+    return { gravados: linhas.length };
+  } finally {
+    trava.releaseLock();
+  }
 }
 
 /* Efeito de um lançamento no saldo (igual ao app): entrada soma, saída

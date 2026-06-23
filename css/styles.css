@@ -156,15 +156,65 @@ svg { width: 22px; height: 22px; flex-shrink: 0; }
   cursor: pointer;
 }
 
-.status .ponto { width: 10px; height: 10px; border-radius: 50%; background: #9e9e9e; }
+.status .ponto { width: 10px; height: 10px; border-radius: 50%; background: #9e9e9e; flex-shrink: 0; }
 .status[data-estado="online"] .ponto { background: #2e7d32; }
 .status[data-estado="offline"] .ponto { background: var(--vermelho); }
-.status[data-estado="sincronizando"] .ponto { background: var(--amarelo); animation: pulsar 1s infinite; }
+.status[data-estado="erro"] .ponto { background: var(--vermelho); animation: pulsar 1.4s infinite; }
+.status[data-estado="ocupado"] .ponto { background: var(--amarelo); animation: pulsar 1s infinite; }
 .status[data-estado="sem-config"] .ponto { background: #9e9e9e; }
 
 @keyframes pulsar { 50% { opacity: 0.35; } }
 
-#status-texto { display: none; }
+/* Mostra o texto do estado ao lado da bolinha, sem quebrar o cabeçalho. */
+#status-texto {
+  display: inline-block;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 560px) { #status-texto { max-width: 86px; } }
+
+/* ---- painel/terminal de sincronização ---- */
+.modal-log .modal-corpo { display: flex; flex-direction: column; gap: 12px; }
+.status-painel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.status-linha { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.status-rotulo { color: var(--texto-suave); }
+.status-valor { font-weight: 600; text-align: right; }
+.status-legenda { font-size: 12.5px; color: var(--texto-suave); margin: 0; }
+
+.log-terminal {
+  background: #0c1014;
+  color: #d6e2da;
+  border: 1px solid #243;
+  border-radius: 10px;
+  padding: 10px;
+  height: 300px;
+  max-height: 46vh;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.log-linha { display: flex; gap: 8px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+.log-hora { color: #6b8; flex-shrink: 0; }
+.log-nivel { flex-shrink: 0; font-weight: 700; min-width: 58px; }
+.log-msg { flex: 1; }
+.log-info .log-nivel { color: #8aa; }
+.log-conexao .log-nivel { color: #6cf; }
+.log-envio .log-nivel { color: #fc6; }
+.log-busca .log-nivel { color: #9cf; }
+.log-ok .log-nivel { color: #6e6; }
+.log-erro .log-nivel { color: #f77; }
+.log-erro .log-msg { color: #f99; }
 
 .botao-tema {
   display: inline-flex;
