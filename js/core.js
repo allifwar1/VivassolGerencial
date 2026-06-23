@@ -285,9 +285,29 @@ function apiConfigurada() {
 // Tempo máximo (ms) que esperamos uma resposta do Apps Script antes de desistir.
 // Sem isso, um pedido travado deixava a sincronização presa em "Sincronizando…"
 // para sempre, mesmo com a internet funcionando.
-const TEMPO_LIMITE_API = 45000;
+const TEMPO_LIMITE_API = 60000;
 
-async function chamarApi(acao, payload) {
+async function chamarApi(acao, payload, opcoes = {}) {
+  // Ações idempotentes (obterTudo, salvarTabela) podem ser repetidas com
+  // segurança quando o Google devolve um erro TRANSITÓRIO (página HTML de
+  // erro, 404/5xx do gateway). Esses erros somem numa segunda tentativa.
+  const tentativasMax = Math.max(1, opcoes.tentativas || 1);
+  let ultimoErro;
+  for (let tentativa = 1; tentativa <= tentativasMax; tentativa++) {
+    try {
+      return await chamarApiUmaVez(acao, payload);
+    } catch (e) {
+      ultimoErro = e;
+      if (!e.transitorio || tentativa === tentativasMax) throw e;
+      const espera = 2000 * tentativa;
+      logar("info", `"${acao}" falhou (${e.message}). Tentando de novo em ${espera / 1000}s (tentativa ${tentativa + 1}/${tentativasMax}).`);
+      await new Promise((r) => setTimeout(r, espera));
+    }
+  }
+  throw ultimoErro;
+}
+
+async function chamarApiUmaVez(acao, payload) {
   const controle = new AbortController();
   const estouro = setTimeout(() => controle.abort(), TEMPO_LIMITE_API);
   let resposta;
@@ -327,16 +347,17 @@ async function chamarApi(acao, payload) {
     json = JSON.parse(texto);
   } catch (e) {
     // Apps Script retornou HTML em vez de JSON. Causas comuns:
+    // • erro transitório do gateway do Google (404/502 com página de erro)
     // • implantação desatualizada (re-implante o Apps Script)
     // • Apps Script precisando de nova autorização
-    // • erro de quota do Google (muitas chamadas por minuto)
     // • URL aponta para /dev (teste) em vez de /exec (produção)
-    const preview = texto.slice(0, 300).replace(/[\r\n]+/g, " ").trim();
+    const preview = texto.slice(0, 200).replace(/[\r\n]+/g, " ").trim();
     logar("erro", `Apps Script retornou HTML/não-JSON (HTTP ${resposta.status}). Início: "${preview}"`);
     const err = new Error(
-      `Apps Script retornou resposta inválida (HTTP ${resposta.status}) — veja o log para detalhes`
+      `resposta inválida do servidor (HTTP ${resposta.status})`
     );
-    err.rede = false; // o servidor respondeu; não é falha de rede
+    err.rede = false;       // o servidor respondeu; não é falha de internet
+    err.transitorio = true; // vale a pena repetir — costuma ser falha passageira do Google
     throw err;
   }
 
@@ -455,7 +476,7 @@ async function enviarPendentes() {
       atualizarStatus("enviando", `Enviando "${tabela}"…`);
       try {
         const t0 = Date.now();
-        const r = await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
+        const r = await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) }, { tentativas: 3 });
         App.tabelasPendentes.delete(tabela);
         salvarPendentesLocal();
         logar("ok", `"${tabela}" enviada (${r?.linhas ?? "?"} linha(s), ${Date.now() - t0}ms).`);
@@ -559,7 +580,7 @@ async function sincronizar(opcoes = {}) {
       atualizarStatus("enviando", `Enviando "${tabela}"…`);
       try {
         const t0 = Date.now();
-        const r = await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) });
+        const r = await chamarApi("salvarTabela", { tabela, linhas: linhasParaEnvioDe(tabela) }, { tentativas: 3 });
         App.tabelasPendentes.delete(tabela);
         tabelasEnviadasAgora.add(tabela);
         salvarPendentesLocal();
@@ -575,7 +596,7 @@ async function sincronizar(opcoes = {}) {
     atualizarStatus("buscando", "Buscando dados da planilha…");
     logar("busca", "Baixando dados atualizados da planilha…");
     const t0 = Date.now();
-    const dados = await chamarApi("obterTudo");
+    const dados = await chamarApi("obterTudo", null, { tentativas: 3 });
     logar("ok", `Dados recebidos da planilha (${Date.now() - t0}ms).`);
     const antes = JSON.stringify(App.db);
 

@@ -168,6 +168,10 @@ function obterTudo() {
   ABAS_DE_DADOS.forEach(function (nome) {
     dados[nome] = lerTabela(planilha, nome);
   });
+  // O painel informativo é atualizado aqui (na LEITURA), não em cada gravação.
+  // Assim cada salvarTabela fica bem mais rápido (não re-escaneia todas as
+  // abas a cada envio), evitando os tempos-limite no envio de "vendas".
+  try { atualizarPainel(planilha); } catch (e) { /* painel é só enfeite */ }
   return dados;
 }
 
@@ -233,7 +237,9 @@ function escreverTabela_(planilha, nome, linhas) {
     aba.getRange(2, 1, matriz.length, cabecalho.length).setValues(matriz);
   }
 
-  atualizarPainel(planilha);
+  // NÃO atualiza o painel aqui de propósito: isso re-escaneia todas as abas
+  // e tornava cada envio lento (e "vendas" estourava o tempo-limite). O painel
+  // é atualizado na leitura (obterTudo).
   return linhas.length;
 }
 
