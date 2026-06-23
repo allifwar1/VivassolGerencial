@@ -310,14 +310,36 @@ async function chamarApi(acao, payload) {
   } finally {
     clearTimeout(estouro);
   }
-  let json;
+
+  // Lê o corpo uma única vez como texto — assim podemos logar o conteúdo
+  // bruto caso não seja JSON válido (ex.: HTML de erro do Google).
+  let texto;
   try {
-    json = await resposta.json();
+    texto = await resposta.text();
   } catch (e) {
-    const err = new Error("resposta inválida da planilha");
+    const err = new Error("falha ao ler corpo da resposta");
     err.rede = true;
     throw err;
   }
+
+  let json;
+  try {
+    json = JSON.parse(texto);
+  } catch (e) {
+    // Apps Script retornou HTML em vez de JSON. Causas comuns:
+    // • implantação desatualizada (re-implante o Apps Script)
+    // • Apps Script precisando de nova autorização
+    // • erro de quota do Google (muitas chamadas por minuto)
+    // • URL aponta para /dev (teste) em vez de /exec (produção)
+    const preview = texto.slice(0, 300).replace(/[\r\n]+/g, " ").trim();
+    logar("erro", `Apps Script retornou HTML/não-JSON (HTTP ${resposta.status}). Início: "${preview}"`);
+    const err = new Error(
+      `Apps Script retornou resposta inválida (HTTP ${resposta.status}) — veja o log para detalhes`
+    );
+    err.rede = false; // o servidor respondeu; não é falha de rede
+    throw err;
+  }
+
   if (!json.ok) throw new Error(json.erro || "erro na planilha");
   return json.dados;
 }
