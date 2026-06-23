@@ -100,10 +100,14 @@ function configurarPlanilha() {
 
 /* ---------------- pontos de entrada ---------------- */
 
+// Marca da versão do código. Atualize a cada deploy importante para conferir,
+// abrindo a URL /exec no navegador, se a versão publicada é mesmo a mais nova.
+var VERSAO_CODIGO = "2026-06-23-d";
+
 function doGet() {
   return resposta({
     ok: true,
-    dados: { servico: "Vivassol Gerencial V2", hora: new Date().toISOString() },
+    dados: { servico: "Vivassol Gerencial V2", versao: VERSAO_CODIGO, hora: new Date().toISOString() },
   });
 }
 
@@ -569,35 +573,28 @@ function setConfig_(cfg, chave, valor) {
   cfg.push({ chave: chave, valor: valor });
 }
 
-// Versão do esquema: incremente quando mudar as colunas de qualquer tabela.
-// Isso força garantirCabecalho a revalidar o cabeçalho no próximo deploy.
-var SCHEMA_VERSAO = "v4";
-
-/* Garante que a linha 1 da aba tenha exatamente as colunas esperadas.
-   Usa ScriptProperties como cache: depois da primeira verificação bem-sucedida,
-   retorna imediatamente sem fazer NENHUMA chamada à API do Sheets — tornando
-   cada gravação muito mais rápida. Só re-verifica se SCHEMA_VERSAO mudar. */
+/* Garante que a linha 1 da aba tenha exatamente as colunas esperadas,
+   na ordem certa. Reescreve o cabeçalho só quando há diferença, então é
+   barato chamar a cada gravação. Usa SOMENTE a API do Sheets (mesmo escopo
+   de autorização das leituras) — não usa PropertiesService nem nada que
+   exija autorização extra. Os dados existentes não saem do lugar porque as
+   colunas novas entram sempre ao FINAL (ver ABAS.vendas). */
 function garantirCabecalho(aba, cabecalho) {
-  var chave = "schema_" + SCHEMA_VERSAO + "_" + aba.getName();
-  var props = PropertiesService.getScriptProperties();
-  if (props.getProperty(chave) === "ok") return; // já verificado nesta versão
-
-  // Primeira verificação (deploy ou mudança de esquema): checa o cabeçalho real.
-  var nCols = Math.max(aba.getLastColumn(), cabecalho.length);
-  var atual = nCols >= 1 ? aba.getRange(1, 1, 1, nCols).getValues()[0].map(String) : [];
-  var precisa = false;
-  for (var i = 0; i < cabecalho.length; i++) {
+  const colunasAtuais = Math.max(aba.getLastColumn(), cabecalho.length);
+  const atual = aba.getLastColumn() >= 1
+    ? aba.getRange(1, 1, 1, colunasAtuais).getValues()[0].map(String)
+    : [];
+  let precisa = false;
+  for (let i = 0; i < cabecalho.length; i++) {
     if (atual[i] !== cabecalho[i]) { precisa = true; break; }
   }
-  if (precisa) {
-    aba.getRange(1, 1, 1, cabecalho.length)
-      .setValues([cabecalho])
-      .setFontWeight("bold")
-      .setBackground("#2E7D32")
-      .setFontColor("#FFFFFF");
-    aba.setFrozenRows(1);
-  }
-  props.setProperty(chave, "ok"); // marca como verificado para todas as próximas gravações
+  if (!precisa) return;
+  aba.getRange(1, 1, 1, cabecalho.length)
+    .setValues([cabecalho])
+    .setFontWeight("bold")
+    .setBackground("#2E7D32")
+    .setFontColor("#FFFFFF");
+  aba.setFrozenRows(1);
 }
 
 /* Aba painel_BD: resumo informativo para quem abre a planilha. */
