@@ -610,7 +610,7 @@ async function sincronizar(opcoes = {}) {
     // Preservar os campos novos de pedido/fluxo. Se a planilha ainda não tem
     // essas colunas (cabeçalho antigo), os valores voltam vazios e a etapa
     // do pedido se perderia — então guardamos por id de item e restauramos.
-    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "data_vencimento", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado", "ordem_fluxo"];
+    const CAMPOS_PEDIDO = ["tipo", "data_entrega", "data_vencimento", "item_pronto", "status_pagamento", "valor_pago", "status_producao", "arquivado", "ordem_fluxo", "estoque_baixado"];
     const pedidoLocal = new Map(
       (App.db.vendas || []).map(linha => [linha.id, linha])
     );
@@ -648,6 +648,7 @@ async function sincronizar(opcoes = {}) {
       });
     }
     migrarIds();
+    migrarSnapshotsBaixa();
     const mudou = JSON.stringify(App.db) !== antes;
     if (mudou) {
       salvarDbLocal();
@@ -973,32 +974,137 @@ async function copiarTexto(texto) {
   }
 }
 
-/* ---------------- baixa de estoque por transição ---------------- */
+/* ============================================================
+   ESTOQUE — baixa idempotente por "recibo" (snapshot)
 
-function aplicarBaixaVenda(venda) {
-  let mudou = false;
-  (venda?.itens || []).forEach((item) => {
-    const produto = App.db.produtos.find((p) => p.id === item.produto_id);
+   Cada pedido guarda na coluna vendas.estoque_baixado um RECIBO do
+   que tirou do estoque, ex.: "INS3(1), INS5(2)". A partir desse recibo,
+   tirar/devolver do estoque é IDEMPOTENTE e à prova de corrida:
+
+   - Só dá baixa se o pedido AINDA NÃO tem recibo (e então grava o recibo).
+   - Só devolve se o pedido TEM recibo, devolvendo EXATAMENTE o que o recibo
+     diz (mesmo que a receita do produto tenha mudado depois), e apaga o recibo.
+
+   Consequências:
+   • Alternar etapas mil vezes e voltar ao início SEMPRE zera o estoque.
+   • Repetir a mesma operação (corrida/clique duplo) não causa efeito duplo.
+   • Como o recibo viaja JUNTO do pedido (mesma linha/tabela), uma planilha
+     defasada nunca deixa "estoque" e "status" inconsistentes — no pior caso
+     um clique precisa ser refeito; nunca surge estoque-fantasma.
+   ============================================================ */
+
+/* Quanto o pedido consome do estoque AGORA (itens × receita), agregado por
+   insumo. Devolve [{ id_insumo, quantidade }]. */
+function consumoDasLinhas(linhas) {
+  const mapa = new Map();
+  (linhas || []).forEach((linha) => {
+    const produto = App.db.produtos.find((p) => p.id === linha.produto_id);
     (produto?.composicao || []).forEach((comp) => {
-      const insumo = App.db.insumos.find((i) => i.id === comp.id_insumo);
-      if (insumo) {
-        insumo.quantidade = numero(insumo.quantidade) - numero(comp.quantidade) * numero(item.quantidade);
-        insumo.atualizado_em = new Date().toISOString();
-        mudou = true;
-      }
+      const qtd = numero(comp.quantidade) * numero(linha.quantidade);
+      if (!qtd) return;
+      mapa.set(comp.id_insumo, (mapa.get(comp.id_insumo) || 0) + qtd);
     });
+  });
+  return [...mapa.entries()].map(([id_insumo, quantidade]) => ({ id_insumo, quantidade }));
+}
+
+function serializarConsumo(lista) {
+  return (lista || [])
+    .filter((c) => numero(c.quantidade) > 0)
+    .map((c) => `${c.id_insumo}(${c.quantidade})`)
+    .join(", ");
+}
+
+function parseConsumo(str) {
+  if (!str) return [];
+  return String(str).split(",").map((s) => s.trim()).filter(Boolean).flatMap((parte) => {
+    const m = parte.match(/^(\w+)\(([^)]+)\)$/);
+    return m ? [{ id_insumo: m[1], quantidade: numero(m[2]) }] : [];
+  });
+}
+
+function linhasDaVenda(idVenda) {
+  return App.db.vendas.filter((l) => (l.id_venda || l.id) === idVenda);
+}
+
+/* Lê o recibo de baixa do pedido (a 1ª linha que tiver recibo manda). */
+function lerSnapshotBaixa(idVenda) {
+  const linha = linhasDaVenda(idVenda).find((l) => l.estoque_baixado);
+  return parseConsumo(linha ? linha.estoque_baixado : "");
+}
+
+/* Grava (ou limpa, com "") o recibo em TODAS as linhas do pedido. */
+function gravarSnapshotBaixa(idVenda, texto) {
+  linhasDaVenda(idVenda).forEach((l) => { l.estoque_baixado = texto || ""; });
+}
+
+/* Soma (sinal +1) ou subtrai (sinal -1) uma lista de consumo no estoque. */
+function aplicarConsumoNoEstoque(lista, sinal) {
+  let mudou = false;
+  (lista || []).forEach((c) => {
+    const insumo = App.db.insumos.find((i) => i.id === c.id_insumo);
+    if (!insumo) return;
+    insumo.quantidade = numero(insumo.quantidade) + sinal * numero(c.quantidade);
+    insumo.atualizado_em = new Date().toISOString();
+    mudou = true;
   });
   return mudou;
 }
 
-/* Ajusta o estoque ao mudar a etapa de produção: dá baixa quando o pedido
-   passa a valer como venda e devolve ao estoque quando deixa de valer. */
-function ajustarEstoquePorTransicao(venda, statusAntigo, statusNovo) {
-  const antesAtivo = contaComoVenda(statusAntigo);
-  const agoraAtivo = contaComoVenda(statusNovo);
-  if (!antesAtivo && agoraAtivo) return aplicarBaixaVenda(venda);
-  if (antesAtivo && !agoraAtivo) return revertirBaixaVenda(venda);
-  return false;
+/* CORAÇÃO da robustez: deixa o estoque do pedido no estado desejado, de forma
+   IDEMPOTENTE. deveBaixar = true quando o pedido conta como venda (não é
+   orçamento nem cancelado). Devolve o que mudou, para o chamador salvar. */
+function definirBaixaVenda(idVenda, deveBaixar) {
+  const snapshot = lerSnapshotBaixa(idVenda);
+  const temBaixa = snapshot.length > 0;
+  const res = { mudouEstoque: false, mudouVendas: false };
+
+  if (deveBaixar && !temBaixa) {
+    const consumo = consumoDasLinhas(linhasDaVenda(idVenda));
+    res.mudouEstoque = aplicarConsumoNoEstoque(consumo, -1);
+    gravarSnapshotBaixa(idVenda, serializarConsumo(consumo));
+    res.mudouVendas = true;
+  } else if (!deveBaixar && temBaixa) {
+    res.mudouEstoque = aplicarConsumoNoEstoque(snapshot, +1);
+    gravarSnapshotBaixa(idVenda, "");
+    res.mudouVendas = true;
+  }
+  return res;
+}
+
+/* Acerta o estoque do pedido conforme o status atual dele (idempotente).
+   Útil para reconciliar após sincronizar ou editar. */
+function reconciliarEstoqueVenda(idVenda) {
+  const linhas = linhasDaVenda(idVenda);
+  if (!linhas.length) return { mudouEstoque: false, mudouVendas: false };
+  return definirBaixaVenda(idVenda, contaComoVenda(statusProducaoDe(linhas[0])));
+}
+
+/* Salva as tabelas afetadas por uma mudança de baixa. */
+function salvarAposBaixa(res) {
+  if (res.mudouEstoque) salvarTabela("insumos");
+  if (res.mudouVendas) salvarTabela("vendas");
+}
+
+/* Migração única: inicializa o recibo de baixa dos pedidos JÁ ativos sem mexer
+   no estoque (assume que a quantidade atual já reflete essas baixas, como no
+   sistema antigo). A partir daí toda baixa/devolução passa a ser idempotente. */
+function migrarSnapshotsBaixa() {
+  if (obterConfig("estoque_snapshot_v1", "") === "sim") return;
+  const ids = new Set(App.db.vendas.map((l) => l.id_venda || l.id));
+  ids.forEach((idVenda) => {
+    const linhas = linhasDaVenda(idVenda);
+    if (linhas.some((l) => l.estoque_baixado)) return; // já tem recibo
+    if (contaComoVenda(statusProducaoDe(linhas[0]))) {
+      gravarSnapshotBaixa(idVenda, serializarConsumo(consumoDasLinhas(linhas)));
+    }
+  });
+  const cfg = App.db.configuracoes;
+  const idx = cfg.findIndex((c) => c.chave === "estoque_snapshot_v1");
+  if (idx >= 0) cfg[idx].valor = "sim"; else cfg.push({ chave: "estoque_snapshot_v1", valor: "sim" });
+  App.tabelasPendentes.add("vendas");
+  App.tabelasPendentes.add("configuracoes");
+  salvarPendentesLocal();
 }
 
 /* ---------------- ações sobre o pedido (compartilhadas) ---------------- */
@@ -1026,13 +1132,12 @@ async function mudarStatusProducao(idVenda, novoStatus, opcoes = {}) {
   }
 
   if (devolver) registrarDevolucaoVenda(idVenda);
-  // Guarda de segurança extra: re-lê o status do banco local imediatamente antes
-  // de ajustar o estoque, pra garantir que um sync concorrente não fez a transição
-  // já acontecer (evita duplo revert de estoque em condição de corrida).
+  // Re-lê o status do banco local; se um sync concorrente já fez a transição,
+  // não há o que fazer.
   const vendaAtual = agruparVendas(App.db.vendas).find((v) => v.id_venda === idVenda);
   if (!vendaAtual || vendaAtual.status_producao === novoStatus) return false;
-  if (ajustarEstoquePorTransicao(vendaAtual, vendaAtual.status_producao, novoStatus)) salvarTabela("insumos");
 
+  // 1) Atualiza o status nas linhas do pedido.
   const statusCompat = novoStatus === "Cancelado" ? "Cancelada"
     : novoStatus === "Entregue" ? "Concluída" : "Pendente";
   App.db.vendas.forEach((linha) => {
@@ -1042,6 +1147,11 @@ async function mudarStatusProducao(idVenda, novoStatus, opcoes = {}) {
       linha.tipo = novoStatus === "Orçamento" ? "Orçamento" : "Pedido";
     }
   });
+  // 2) Acerta o estoque de forma idempotente conforme o NOVO status (usa o
+  //    recibo de baixa, então alternar etapas nunca acumula erro).
+  const baixa = definirBaixaVenda(idVenda, contaComoVenda(novoStatus));
+  if (baixa.mudouEstoque) salvarTabela("insumos");
+  // O status e o recibo vivem ambos na tabela vendas — um único salvar cobre os dois.
   salvarTabela("vendas");
   if (!opcoes.silencioso) toast(`Pedido movido para "${novoStatus}".`);
   if (opcoes.aoMudar) opcoes.aoMudar();

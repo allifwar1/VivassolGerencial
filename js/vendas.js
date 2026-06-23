@@ -65,22 +65,6 @@ function calcularCustoVenda(venda) {
   }, 0);
 }
 
-function revertirBaixaVenda(venda) {
-  let mudou = false;
-  (venda?.itens || []).forEach(item => {
-    const produto = App.db.produtos.find(p => p.id === item.produto_id);
-    (produto?.composicao || []).forEach(comp => {
-      const insumo = App.db.insumos.find(i => i.id === comp.id_insumo);
-      if (insumo) {
-        insumo.quantidade = numero(insumo.quantidade) + numero(comp.quantidade) * numero(item.quantidade);
-        insumo.atualizado_em = new Date().toISOString();
-        mudou = true;
-      }
-    });
-  });
-  return mudou;
-}
-
 /* ---------------- lista de pedidos ---------------- */
 
 function renderListaPedidos(el) {
@@ -246,8 +230,9 @@ function abrirDetalheVenda(idVenda, aoMudar) {
     $("#detalhe-excluir", corpo).addEventListener("click", async () => {
       const ok = await confirmar("Excluir este pedido? Ele será removido da planilha.", { perigo: true, botao: "Excluir" });
       if (!ok) return;
-      const vAtual = agruparVendas(App.db.vendas).find((x) => x.id_venda === idVenda);
-      if (contaComoVenda(vAtual.status_producao) && revertirBaixaVenda(vAtual)) salvarTabela("insumos");
+      // Devolve ao estoque exatamente o que este pedido tinha baixado (pelo
+      // recibo), de forma idempotente, antes de remover as linhas.
+      if (definirBaixaVenda(idVenda, false).mudouEstoque) salvarTabela("insumos");
       App.db.vendas = App.db.vendas.filter((linha) => (linha.id_venda || linha.id) !== idVenda);
       salvarTabela("vendas");
       mudou = true;
@@ -584,8 +569,8 @@ function abrirEditarVenda(idVenda, aoMudar) {
     const clienteCadastrado = App.db.clientes.find(c => semAcentos(c.nome) === semAcentos(nomeCliente));
     const ativoAgora = contaComoVenda(vendaAgrupada.status_producao);
 
-    // Reverter baixa original (só se o pedido contava como venda)
-    if (ativoAgora && revertirBaixaVenda(vendaAgrupada)) salvarTabela("insumos");
+    // Devolve ao estoque a baixa antiga (pelo recibo) ANTES de trocar as linhas.
+    if (definirBaixaVenda(idVenda, false).mudouEstoque) salvarTabela("insumos");
 
     // Substituir linhas da venda preservando etapa/pagamento/tipo
     App.db.vendas = App.db.vendas.filter(v => (v.id_venda || v.id) !== idVenda);
@@ -618,11 +603,8 @@ function abrirEditarVenda(idVenda, aoMudar) {
       });
     });
 
-    // Aplicar nova baixa (só se contava como venda)
-    if (ativoAgora) {
-      const vNova = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
-      if (aplicarBaixaVenda(vNova)) salvarTabela("insumos");
-    }
+    // Aplica a nova baixa (idempotente) conforme os itens e o status atuais.
+    if (definirBaixaVenda(idVenda, ativoAgora).mudouEstoque) salvarTabela("insumos");
     // Recalcula a situação de pagamento (o total pode ter mudado).
     sincronizarPagamentoNaVenda(idVenda);
     salvarTabela("vendas");
@@ -1017,10 +999,8 @@ function renderPdv(el, opcoes = {}) {
         salvarTabela("vendas");
 
         // Baixa de estoque só quando o pedido já vale como venda (não orçamento).
-        if (contaComoVenda(statusProducao)) {
-          const vNova = agruparVendas(App.db.vendas).find(v => v.id_venda === idVenda);
-          if (aplicarBaixaVenda(vNova)) salvarTabela("insumos");
-        }
+        // Idempotente e com recibo: nunca baixa duas vezes.
+        if (definirBaixaVenda(idVenda, contaComoVenda(statusProducao)).mudouEstoque) salvarTabela("insumos");
 
         // Registra o valor já recebido (se informado), independente de ser prazo ou à vista.
         if (!ehOrcamento && recebido > 0) {

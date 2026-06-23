@@ -35,7 +35,7 @@ const ABAS = {
            "quantidade", "preco_unit", "subtotal", "pagamento", "status", "entrega",
            "observacoes", "criado_por", "criado_em",
            "tipo", "data_entrega", "item_pronto", "status_pagamento", "valor_pago",
-           "status_producao", "arquivado", "data_vencimento", "ordem_fluxo"],
+           "status_producao", "arquivado", "data_vencimento", "ordem_fluxo", "estoque_baixado"],
   // Histórico de recebimentos de cada venda (uma linha por pagamento).
   pagamentos: ["id", "id_venda", "cliente_nome", "data", "valor", "forma_pagamento",
                "criado_por", "criado_em"],
@@ -102,7 +102,7 @@ function configurarPlanilha() {
 
 // Marca da versão do código. Atualize a cada deploy importante para conferir,
 // abrindo a URL /exec no navegador, se a versão publicada é mesmo a mais nova.
-var VERSAO_CODIGO = "2026-06-23-d";
+var VERSAO_CODIGO = "2026-06-23-e";
 
 function doGet() {
   return resposta({
